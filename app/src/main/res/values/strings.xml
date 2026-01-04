@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lotería Probabilidad</string>
+    <string name="app_description">Analiza las probabilidades de loterías españolas</string>
+    
+    <!-- Nombres de loterías -->
+    <string name="primitiva">La Primitiva</string>
+    <string name="bonoloto">Bonoloto</string>
+    <string name="euromillones">Euromillones</string>
+    <string name="gordo_primitiva">El Gordo de la Primitiva</string>
+    <string name="loteria_nacional">Lotería Nacional</string>
+    <string name="navidad">El Gordo de Navidad</string>
+    <string name="nino">El Niño</string>
+    
+    <!-- Acciones -->
+    <string name="volver">Volver</string>
+    <string name="regenerar">Regenerar combinaciones</string>
+    <string name="compartir">Compartir</string>
+    <string name="reintentar">Reintentar</string>
+    
+    <!-- Estados -->
+    <string name="cargando">Cargando…</string>
+    <string name="analizando">Analizando histórico…</string>
+    <string name="sin_datos">No hay datos disponibles</string>
+    
+    <!-- Mensajes -->
+    <string name="disclaimer">Los sorteos de lotería son eventos aleatorios. Este análisis se basa en frecuencias históricas y NO garantiza resultados futuros. Juega con responsabilidad.</string>
+    <string name="error_carga">Error al cargar los datos</string>
+</resources>

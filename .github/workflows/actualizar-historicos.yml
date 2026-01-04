@@ -1,0 +1,80 @@
+name: Actualizar Históricos de Loterías
+
+on:
+  # Ejecutar cada día a las 23:00 UTC (00:00 hora España)
+  schedule:
+    - cron: '0 23 * * *'
+  
+  # También permitir ejecución manual
+  workflow_dispatch:
+    inputs:
+      desde_anio:
+        description: 'Año desde el que generar datos'
+        required: false
+        default: '1985'
+
+jobs:
+  actualizar-datos:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          # Si necesitas dependencias adicionales, añádelas aquí
+          # pip install requests beautifulsoup4
+      
+      - name: Ejecutar script de actualización
+        run: |
+          cd scripts
+          python descargar_historicos.py --all --desde ${{ github.event.inputs.desde_anio || '1985' }}
+      
+      - name: Verificar cambios en los CSV
+        id: verify
+        run: |
+          if git diff --quiet app/src/main/res/raw/*.csv; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No hay cambios en los datos"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Se detectaron cambios en los CSV"
+            git diff --stat app/src/main/res/raw/*.csv
+          fi
+      
+      - name: Commit y push de los cambios
+        if: steps.verify.outputs.changed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Añadir solo los CSV actualizados
+          git add app/src/main/res/raw/*.csv
+          
+          # Crear commit con fecha
+          FECHA=$(date +'%Y-%m-%d')
+          git commit -m "📊 Actualización automática de históricos - $FECHA"
+          
+          # Push al repositorio
+          git push
+      
+      - name: Resumen de la ejecución
+        run: |
+          echo "## 📊 Resumen de Actualización" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Archivo | Líneas |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          for csv in app/src/main/res/raw/*.csv; do
+            NOMBRE=$(basename $csv)
+            LINEAS=$(wc -l < $csv)
+            echo "| $NOMBRE | $LINEAS |" >> $GITHUB_STEP_SUMMARY
+          done

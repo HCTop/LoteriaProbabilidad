@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bola de lotería -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,27
+                         C39.088,27 27,39.088 27,54
+                         C27,68.912 39.088,81 54,81
+                         C68.912,81 81,68.912 81,54
+                         C81,39.088 68.912,27 54,27Z"/>
+    <!-- Brillo -->
+    <path
+        android:fillColor="#FFE082"
+        android:pathData="M42,42
+                         C38,46 36,51 36,54
+                         C36,57 37,60 39,63
+                         C35,58 33,52 35,46
+                         C37,42 40,39 42,42Z"/>
+    <!-- Número 7 en la bola -->
+    <path
+        android:fillColor="#B8860B"
+        android:pathData="M45,42 L63,42 L63,47 L55,67 L49,67 L56,47 L45,47 Z"/>
+</vector>

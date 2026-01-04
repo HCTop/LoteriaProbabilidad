@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colores primarios - Dorado -->
+    <color name="gold_primary">#D4AF37</color>
+    <color name="gold_light">#FFE082</color>
+    <color name="gold_dark">#B8860B</color>
+    
+    <!-- Colores secundarios - Púrpura -->
+    <color name="purple_primary">#7B1FA2</color>
+    <color name="purple_dark">#4A148C</color>
+    <color name="purple_light">#E1BEE7</color>
+    
+    <!-- Estados -->
+    <color name="success">#2E7D32</color>
+    <color name="error">#C62828</color>
+    <color name="warning">#F57C00</color>
+    
+    <!-- Fondos -->
+    <color name="background_light">#FFFBF5</color>
+    <color name="background_dark">#121212</color>
+    <color name="surface_light">#FFFFFF</color>
+    <color name="surface_dark">#1E1E1E</color>
+    
+    <!-- Colores de loterías -->
+    <color name="primitiva_primary">#1976D2</color>
+    <color name="primitiva_secondary">#42A5F5</color>
+    <color name="bonoloto_primary">#388E3C</color>
+    <color name="bonoloto_secondary">#66BB6A</color>
+    <color name="euromillones_primary">#D4AF37</color>
+    <color name="euromillones_secondary">#FFE082</color>
+    <color name="gordo_primary">#F57C00</color>
+    <color name="gordo_secondary">#FFB74D</color>
+    <color name="nacional_primary">#7B1FA2</color>
+    <color name="nacional_secondary">#BA68C8</color>
+    <color name="navidad_primary">#C62828</color>
+    <color name="navidad_secondary">#EF5350</color>
+    <color name="nino_primary">#00796B</color>
+    <color name="nino_secondary">#4DB6AC</color>
+</resources>
