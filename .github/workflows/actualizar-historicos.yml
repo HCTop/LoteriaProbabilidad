@@ -1,3 +1,4 @@
+# Workflow para actualizar datos de loterías
 name: Actualizar Históricos de Loterías
 
 on:
