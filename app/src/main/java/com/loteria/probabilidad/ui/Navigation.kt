@@ -19,6 +19,9 @@ sealed class Screen(val route: String) {
     data object Resultados : Screen("resultados/{tipoLoteria}") {
         fun createRoute(tipoLoteria: TipoLoteria) = "resultados/${tipoLoteria.name}"
     }
+    data object Backtest : Screen("backtest/{tipoLoteria}") {
+        fun createRoute(tipoLoteria: TipoLoteria) = "backtest/${tipoLoteria.name}"
+    }
 }
 
 /**
@@ -75,8 +78,60 @@ fun LoteriaProbabilidadApp() {
                 onBackClick = { navController.popBackStack() },
                 onRefresh = { viewModel.regenerarResultados() },
                 onCambiarRangoFechas = { viewModel.cambiarRangoFechas(it) },
-                onCambiarMetodo = { viewModel.cambiarMetodo(it) }
+                onCambiarMetodo = { viewModel.cambiarMetodo(it) },
+                onBacktestClick = { 
+                    navController.navigate(Screen.Backtest.createRoute(tipoLoteria))
+                }
+            )
+        }
+        
+        // Pantalla de Backtesting
+        composable(
+            route = Screen.Backtest.route,
+            arguments = listOf(
+                navArgument("tipoLoteria") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val tipoLoteriaName = backStackEntry.arguments?.getString("tipoLoteria")
+            val tipoLoteria = tipoLoteriaName?.let { 
+                TipoLoteria.valueOf(it) 
+            } ?: TipoLoteria.PRIMITIVA
+            
+            val context = LocalContext.current
+            val viewModel: ResultadosViewModel = viewModel(
+                factory = ResultadosViewModel.Factory(context)
+            )
+            
+            // Cargar datos
+            LaunchedEffect(tipoLoteria) {
+                viewModel.cargarResultados(tipoLoteria)
+            }
+            
+            val uiState by viewModel.uiState.collectAsState()
+            
+            // Extraer históricos del ViewModel
+            val historicoPrimitiva = remember(uiState) { viewModel.getHistoricoPrimitiva() }
+            val historicoBonoloto = remember(uiState) { viewModel.getHistoricoBonoloto() }
+            val historicoEuromillones = remember(uiState) { viewModel.getHistoricoEuromillones() }
+            val historicoGordo = remember(uiState) { viewModel.getHistoricoGordo() }
+            val historicoNacional = remember(uiState) { viewModel.getHistoricoNacional() }
+            val historicoNavidad = remember(uiState) { viewModel.getHistoricoNavidad() }
+            val historicoNino = remember(uiState) { viewModel.getHistoricoNino() }
+            
+            PantallaBacktest(
+                tipoLoteria = tipoLoteria,
+                historicoPrimitiva = historicoPrimitiva,
+                historicoBonoloto = historicoBonoloto,
+                historicoEuromillones = historicoEuromillones,
+                historicoGordo = historicoGordo,
+                historicoNacional = historicoNacional,
+                historicoNavidad = historicoNavidad,
+                historicoNino = historicoNino,
+                onVolver = { navController.popBackStack() }
             )
         }
     }
 }
+
+// Helper class para múltiples valores (ya no se usa pero se mantiene por compatibilidad)
+data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

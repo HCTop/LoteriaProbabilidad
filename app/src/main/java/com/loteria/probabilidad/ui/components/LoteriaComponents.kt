@@ -212,13 +212,18 @@ fun CombinacionCard(
                     color = MaterialTheme.colorScheme.primary
                 )
                 
-                // Badge de probabilidad relativa
+                // Badge de probabilidad relativa (formateado a 2 decimales máximo)
+                val probabilidadFormateada = if (combinacion.probabilidadRelativa < 0.01) {
+                    String.format("%.4f", combinacion.probabilidadRelativa)
+                } else {
+                    String.format("%.2f", combinacion.probabilidadRelativa)
+                }
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Text(
-                        text = "${combinacion.probabilidadRelativa}%",
+                        text = "$probabilidadFormateada%",
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         color = MaterialTheme.colorScheme.onPrimaryContainer

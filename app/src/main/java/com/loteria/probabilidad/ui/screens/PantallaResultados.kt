@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,10 +47,14 @@ fun PantallaResultados(
     onRefresh: () -> Unit,
     onCambiarRangoFechas: (OpcionRangoFechas) -> Unit,
     onCambiarMetodo: (MetodoCalculo) -> Unit,
+    onBacktestClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var mostrarSelectorFechas by remember { mutableStateOf(false) }
     var mostrarSelectorMetodo by remember { mutableStateOf(false) }
+    
+    // Backtesting disponible para todas las loterías
+    val soportaBacktest = true
 
     Scaffold(
         topBar = {
@@ -77,6 +82,15 @@ fun PantallaResultados(
                     }
                 },
                 actions = {
+                    // Botón de Backtesting (solo si lo soporta)
+                    if (soportaBacktest) {
+                        IconButton(onClick = onBacktestClick) {
+                            Icon(
+                                imageVector = Icons.Default.Science,
+                                contentDescription = "Backtesting"
+                            )
+                        }
+                    }
                     // Botón de método de cálculo
                     IconButton(onClick = { mostrarSelectorMetodo = true }) {
                         Icon(
@@ -382,6 +396,15 @@ private fun InfoCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
             )
+            // Mostrar fecha del último sorteo (actualización de datos)
+            analisis.fechaUltimoSorteo?.let { fecha ->
+                Text(
+                    text = "📅 Datos hasta: $fecha",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
             if (analisis.fechaDesde != null || analisis.fechaHasta != null) {
                 val rangoTexto = buildString {
                     analisis.fechaDesde?.let { append("Desde: $it") }

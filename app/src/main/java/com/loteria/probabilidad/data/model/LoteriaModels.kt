@@ -70,6 +70,22 @@ enum class TipoLoteria(
 }
 
 /**
+ * Resultado de un test de backtesting
+ */
+data class ResultadoBacktest(
+    val metodo: MetodoCalculo,
+    val sorteosProbados: Int,
+    val aciertos0: Int,      // 0 números acertados
+    val aciertos1: Int,      // 1 número acertado
+    val aciertos2: Int,      // 2 números acertados
+    val aciertos3: Int,      // 3 números acertados
+    val aciertos4: Int,      // 4+ números acertados
+    val puntuacionTotal: Double,  // Score ponderado
+    val mejorAcierto: Int,   // Máximo de números acertados en un sorteo
+    val promedioAciertos: Double
+)
+
+/**
  * Métodos de cálculo de probabilidad disponibles.
  */
 enum class MetodoCalculo(
@@ -77,6 +93,13 @@ enum class MetodoCalculo(
     val descripcion: String,
     val explicacionCorta: String
 ) {
+    IA_GENETICA(
+        displayName = "🤖 IA Genética",
+        descripcion = "Sistema de Inteligencia Artificial que usa algoritmos genéticos con 500 individuos " +
+                "evolucionando durante 50 generaciones. Combina: análisis de frecuencias, gaps, tendencias, " +
+                "patrones de pares, balance estructural y detección de ciclos. Los pesos se ajustan dinámicamente.",
+        explicacionCorta = "Algoritmo genético + ensemble de 6 predictores"
+    ),
     LAPLACE(
         displayName = "Regla de Laplace",
         descripcion = "Probabilidad teórica: casos favorables / casos posibles. " +
@@ -216,7 +239,8 @@ data class AnalisisProbabilidad(
     val complementariosMasFrequentes: List<EstadisticaNumero> = emptyList(),
     val fechaDesde: String? = null,
     val fechaHasta: String? = null,
-    val probabilidadTeorica: String = ""  // Para mostrar la probabilidad según Laplace
+    val probabilidadTeorica: String = "",  // Para mostrar la probabilidad según Laplace
+    val fechaUltimoSorteo: String? = null  // Fecha del sorteo más reciente en los datos
 )
 
 /**
