@@ -6,11 +6,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -22,7 +22,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.net.URL
 
 /**
@@ -41,6 +40,8 @@ fun PantallaSeleccionLoteria(
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
     
+    val githubBaseUrl = "https://raw.githubusercontent.com/HCTop/LoteriaProbabilidad/master/app/src/main/res/raw/"
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -70,8 +71,8 @@ fun PantallaSeleccionLoteria(
             modifier = modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .verticalScroll(scrollState)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Título y descripción
@@ -157,7 +158,7 @@ fun PantallaSeleccionLoteria(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                 )
             ) {
                 Column(
@@ -165,29 +166,25 @@ fun PantallaSeleccionLoteria(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "📊 Datos Históricos",
+                        "🌐 Actualización de Datos",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                     
                     Text(
-                        "Los datos se cargan automáticamente desde los recursos de la app. " +
-                        "Si tienes problemas, puedes verificar los datos.",
+                        "Descarga los últimos sorteos reales (incluyendo el día 8) directamente de GitHub.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
                     
-                    // Mostrar mensaje de estado
                     mensajeDescarga?.let { mensaje ->
                         Text(
                             mensaje,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (mensaje.contains("✅")) MaterialTheme.colorScheme.primary 
-                                   else if (mensaje.contains("❌")) MaterialTheme.colorScheme.error
-                                   else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (mensaje.contains("✅")) Color(0xFF2E7D32) else if (mensaje.contains("❌")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                            textAlign = TextAlign.Center
                         )
                     }
                     
@@ -195,56 +192,42 @@ fun PantallaSeleccionLoteria(
                         onClick = {
                             scope.launch {
                                 descargando = true
-                                mensajeDescarga = "🔄 Verificando datos..."
+                                mensajeDescarga = "⏳ Descargando datos de GitHub..."
+                                
+                                val csvFiles = listOf(
+                                    "historico_primitiva.csv",
+                                    "historico_bonoloto.csv",
+                                    "historico_euromillones.csv",
+                                    "historico_gordo_primitiva.csv",
+                                    "historico_loteria_nacional.csv",
+                                    "historico_navidad.csv",
+                                    "historico_nino.csv"
+                                )
+                                
+                                var totalSorteos = 0
+                                var errorOccurred = false
                                 
                                 withContext(Dispatchers.IO) {
                                     try {
-                                        // Verificar que los CSV existen en resources
-                                        val csvFiles = listOf(
-                                            "historico_primitiva.csv",
-                                            "historico_bonoloto.csv",
-                                            "historico_euromillones.csv",
-                                            "historico_gordo_primitiva.csv",
-                                            "historico_loteria_nacional.csv",
-                                            "historico_navidad.csv",
-                                            "historico_nino.csv"
-                                        )
-                                        
-                                        var totalLineas = 0
-                                        var archivosOk = 0
-                                        
-                                        for (csvFile in csvFiles) {
-                                            try {
-                                                val resourceName = csvFile.replace(".csv", "")
-                                                val resId = context.resources.getIdentifier(
-                                                    resourceName, "raw", context.packageName
-                                                )
-                                                if (resId != 0) {
-                                                    val inputStream = context.resources.openRawResource(resId)
-                                                    val lines = inputStream.bufferedReader().readLines().size
-                                                    inputStream.close()
-                                                    totalLineas += lines
-                                                    archivosOk++
-                                                }
-                                            } catch (e: Exception) {
-                                                // Archivo no encontrado
-                                            }
+                                        for (fileName in csvFiles) {
+                                            val url = URL(githubBaseUrl + fileName)
+                                            val contenido = url.readText()
+                                            // Guardamos físicamente en la memoria interna (cache)
+                                            val file = File(context.cacheDir, fileName)
+                                            file.writeText(contenido)
+                                            totalSorteos += (contenido.lines().size - 1)
                                         }
-                                        
+                                    } catch (_: Exception) {
+                                        errorOccurred = true
                                         withContext(Dispatchers.Main) {
-                                            mensajeDescarga = if (archivosOk == csvFiles.size) {
-                                                "✅ $archivosOk archivos verificados, $totalLineas sorteos totales"
-                                            } else {
-                                                "⚠️ $archivosOk/${csvFiles.size} archivos, $totalLineas sorteos"
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        withContext(Dispatchers.Main) {
-                                            mensajeDescarga = "❌ Error: ${e.message}"
+                                            mensajeDescarga = "❌ Error: Comprueba tu conexión"
                                         }
                                     }
                                 }
                                 
+                                if (!errorOccurred) {
+                                    mensajeDescarga = "✅ ¡Actualizado! $totalSorteos sorteos en total."
+                                }
                                 descargando = false
                             }
                         },
@@ -252,17 +235,13 @@ fun PantallaSeleccionLoteria(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (descargando) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.dp
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Verificando...")
+                            Text("Actualizando...")
                         } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Icon(Icons.Default.CloudDownload, null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Verificar datos históricos")
+                            Text("Descargar sorteos actualizados")
                         }
                     }
                 }
