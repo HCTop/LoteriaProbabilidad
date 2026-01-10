@@ -706,8 +706,20 @@ fun ResultadoBacktestCard(
         else -> "#$posicion"
     }
     
-    val totalCombinaciones = resultado.aciertos0 + resultado.aciertos1 + 
-                             resultado.aciertos2 + resultado.aciertos3 + resultado.aciertos4
+    // Calcular total según tipo de lotería
+    val totalBasico = resultado.aciertos0 + resultado.aciertos1 + 
+                      resultado.aciertos2 + resultado.aciertos3 + resultado.aciertos4
+    val totalCombinaciones = if (resultado.aciertos5 > 0 || resultado.aciertos6 > 0) {
+        totalBasico + resultado.aciertos5 + resultado.aciertos6
+    } else {
+        totalBasico
+    }
+    
+    // Determinar tipo de lotería por los campos usados
+    val esPrimitiva = resultado.tipoLoteria in listOf("PRIMITIVA", "BONOLOTO")
+    val esEuromillones = resultado.tipoLoteria == "EUROMILLONES"
+    val esGordo = resultado.tipoLoteria == "GORDO_PRIMITIVA"
+    val esNacional = resultado.tipoLoteria in listOf("LOTERIA_NACIONAL", "NAVIDAD", "NINO")
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -756,7 +768,7 @@ fun ResultadoBacktestCard(
             
             Spacer(modifier = Modifier.height(8.dp))
             
-            // Estadísticas de aciertos con mejor formato
+            // Primera fila: aciertos básicos (0-4)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -765,7 +777,56 @@ fun ResultadoBacktestCard(
                 EstadisticaAciertoMejorada("1 ✓", resultado.aciertos1, totalCombinaciones, Color(0xFF2196F3))
                 EstadisticaAciertoMejorada("2 ✓", resultado.aciertos2, totalCombinaciones, Color(0xFF4CAF50))
                 EstadisticaAciertoMejorada("3 ✓", resultado.aciertos3, totalCombinaciones, Color(0xFFFF9800))
-                EstadisticaAciertoMejorada("4+ ✓", resultado.aciertos4, totalCombinaciones, Color(0xFFF44336))
+                EstadisticaAciertoMejorada("4 ✓", resultado.aciertos4, totalCombinaciones, Color(0xFFF44336))
+            }
+            
+            // Segunda fila: aciertos extendidos según tipo de lotería
+            if (esPrimitiva && (resultado.aciertos5 > 0 || resultado.aciertos6 > 0 || 
+                resultado.aciertosComplementario > 0 || resultado.aciertosReintegro > 0)) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    EstadisticaAciertoMejorada("5 ✓", resultado.aciertos5, totalCombinaciones, Color(0xFFE91E63))
+                    EstadisticaAciertoMejorada("6 🎯", resultado.aciertos6, totalCombinaciones, Color(0xFF9C27B0))
+                    EstadisticaAciertoMejorada("+C", resultado.aciertosComplementario, totalCombinaciones, Color(0xFF00BCD4))
+                    EstadisticaAciertoMejorada("+R", resultado.aciertosReintegro, totalCombinaciones, Color(0xFF8BC34A))
+                }
+            }
+            
+            if (esEuromillones && (resultado.aciertos5 > 0 || 
+                resultado.aciertosEstrella1 > 0 || resultado.aciertosEstrella2 > 0)) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    EstadisticaAciertoMejorada("5 🎯", resultado.aciertos5, totalCombinaciones, Color(0xFF9C27B0))
+                    EstadisticaAciertoMejorada("+⭐", resultado.aciertosEstrella1, totalCombinaciones, Color(0xFFFFD700))
+                    EstadisticaAciertoMejorada("+⭐⭐", resultado.aciertosEstrella2, totalCombinaciones, Color(0xFFFF9800))
+                }
+            }
+            
+            if (esGordo && (resultado.aciertos5 > 0 || resultado.aciertosClave > 0)) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    EstadisticaAciertoMejorada("5 🎯", resultado.aciertos5, totalCombinaciones, Color(0xFF9C27B0))
+                    EstadisticaAciertoMejorada("+K", resultado.aciertosClave, totalCombinaciones, Color(0xFFFFD700))
+                }
+            }
+            
+            if (esNacional && resultado.aciertosReintegro > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    EstadisticaAciertoMejorada("+R", resultado.aciertosReintegro, totalCombinaciones, Color(0xFF8BC34A))
+                }
             }
             
             Spacer(modifier = Modifier.height(12.dp))

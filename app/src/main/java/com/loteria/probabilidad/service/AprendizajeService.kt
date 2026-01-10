@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import com.loteria.probabilidad.MainActivity
 import com.loteria.probabilidad.R
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
@@ -29,6 +30,7 @@ class AprendizajeService : Service() {
         const val EXTRA_TIPO_LOTERIA = "tipo_loteria"
         const val EXTRA_SORTEOS = "sorteos"
         const val EXTRA_ITERACIONES = "iteraciones"
+        const val EXTRA_OPEN_BACKTESTING = "open_backtesting"
         
         // Estado compartido para la UI
         var isRunning = false
@@ -37,6 +39,7 @@ class AprendizajeService : Service() {
         var totalIteraciones = 0
         var ultimoLog = ""
         var entrenamientosCompletados = 0
+        var tipoLoteriaActual = ""  // Para saber qué lotería abrir
         
         fun startLearning(
             context: Context,
@@ -44,6 +47,7 @@ class AprendizajeService : Service() {
             sorteos: Int,
             iteraciones: Int
         ) {
+            tipoLoteriaActual = tipoLoteria
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
@@ -250,12 +254,24 @@ class AprendizajeService : Service() {
             text
         }
         
+        // Intent para abrir la app en backtesting al clicar
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_BACKTESTING, true)
+            putExtra(EXTRA_TIPO_LOTERIA, tipoLoteriaActual)
+        }
+        val openPendingIntent = PendingIntent.getActivity(
+            this, 1, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(titulo)
             .setContentText(subtitulo)
             .setSmallIcon(android.R.drawable.ic_menu_rotate)
             .setOngoing(progress < 100)
             .setProgress(100, progress, false)
+            .setContentIntent(openPendingIntent)  // Al clicar abre backtesting
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopPendingIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)

@@ -74,6 +74,7 @@ enum class TipoLoteria(
 
 /**
  * Resultado de un test de backtesting
+ * Adaptado para cada tipo de lotería con sus categorías específicas
  */
 data class ResultadoBacktest(
     val metodo: MetodoCalculo,
@@ -82,10 +83,18 @@ data class ResultadoBacktest(
     val aciertos1: Int,      // 1 número acertado
     val aciertos2: Int,      // 2 números acertados
     val aciertos3: Int,      // 3 números acertados
-    val aciertos4: Int,      // 4+ números acertados
+    val aciertos4: Int,      // 4 números acertados
+    val aciertos5: Int = 0,  // 5 números acertados (Primitiva/Bonoloto/Euromillones/Gordo)
+    val aciertos6: Int = 0,  // 6 números acertados (Primitiva/Bonoloto)
+    val aciertosComplementario: Int = 0,  // +C (Primitiva/Bonoloto)
+    val aciertosReintegro: Int = 0,       // +R (Primitiva/Bonoloto/Nacional)
+    val aciertosEstrella1: Int = 0,       // +E1 (Euromillones)
+    val aciertosEstrella2: Int = 0,       // +E2 (Euromillones - ambas estrellas)
+    val aciertosClave: Int = 0,           // +K (Gordo de la Primitiva)
     val puntuacionTotal: Double,  // Score ponderado
     val mejorAcierto: Int,   // Máximo de números acertados en un sorteo
-    val promedioAciertos: Double
+    val promedioAciertos: Double,
+    val tipoLoteria: String = ""  // Para saber qué campos mostrar
 )
 
 /**

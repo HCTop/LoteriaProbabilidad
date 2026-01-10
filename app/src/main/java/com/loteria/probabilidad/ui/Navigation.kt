@@ -28,8 +28,29 @@ sealed class Screen(val route: String) {
  * Composable principal de navegación.
  */
 @Composable
-fun LoteriaProbabilidadApp() {
+fun LoteriaProbabilidadApp(
+    navegarABacktesting: Boolean = false,
+    tipoLoteriaBacktesting: String? = null,
+    onBacktestingNavegado: () -> Unit = {}
+) {
     val navController = rememberNavController()
+    
+    // Navegación automática a backtesting desde notificación
+    LaunchedEffect(navegarABacktesting, tipoLoteriaBacktesting) {
+        if (navegarABacktesting && tipoLoteriaBacktesting != null) {
+            try {
+                val tipoLoteria = TipoLoteria.valueOf(tipoLoteriaBacktesting)
+                // Ir a resultados primero y luego a backtesting
+                navController.navigate(Screen.Resultados.createRoute(tipoLoteria)) {
+                    popUpTo(Screen.Seleccion.route)
+                }
+                navController.navigate(Screen.Backtest.createRoute(tipoLoteria))
+                onBacktestingNavegado()
+            } catch (e: Exception) {
+                // Si falla, ignorar
+            }
+        }
+    }
     
     NavHost(
         navController = navController,

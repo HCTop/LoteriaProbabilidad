@@ -1211,7 +1211,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     fun ejecutarBacktestPrimitiva(
         historico: List<ResultadoPrimitiva>,
-        diasAtras: Int = 10
+        diasAtras: Int = 10,
+        tipoLoteria: String = "PRIMITIVA"
     ): List<ResultadoBacktest> {
         if (historico.size <= diasAtras) return emptyList()
         
@@ -1224,6 +1225,10 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var aciertos2 = 0
             var aciertos3 = 0
             var aciertos4 = 0
+            var aciertos5 = 0
+            var aciertos6 = 0
+            var aciertosComplementario = 0
+            var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
             
@@ -1237,25 +1242,42 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 // Generar predicciones con ese histórico
                 val analisis = analizarPrimitivaBonoloto(
                     historico = historicoHastaMomento,
-                    tipoLoteria = TipoLoteria.PRIMITIVA,
+                    tipoLoteria = if (tipoLoteria == "BONOLOTO") TipoLoteria.BONOLOTO else TipoLoteria.PRIMITIVA,
                     metodo = metodo,
                     numCombinaciones = 5
                 )
                 
                 // Sorteo real que ocurrió
-                val sorteoReal = historico[i].numeros.toSet()
+                val sorteoReal = historico[i]
+                val numerosReales = sorteoReal.numeros.toSet()
+                val complementarioReal = sorteoReal.complementario
+                val reintegroReal = sorteoReal.reintegro
                 
                 // Contar aciertos de cada combinación sugerida
                 for (combinacion in analisis.combinacionesSugeridas) {
                     val numerosPredichos = combinacion.numeros.toSet()
-                    val aciertosEnCombinacion = numerosPredichos.intersect(sorteoReal).size
+                    val aciertosEnCombinacion = numerosPredichos.intersect(numerosReales).size
                     
                     when (aciertosEnCombinacion) {
                         0 -> aciertos0++
                         1 -> aciertos1++
                         2 -> aciertos2++
                         3 -> aciertos3++
-                        else -> aciertos4++
+                        4 -> aciertos4++
+                        5 -> aciertos5++
+                        6 -> aciertos6++
+                    }
+                    
+                    // Verificar complementario (si acertó 5 y tiene el complementario)
+                    if (aciertosEnCombinacion >= 5 && complementarioReal in numerosPredichos) {
+                        aciertosComplementario++
+                    }
+                    
+                    // El reintegro es un número extra (0-9), difícil de predecir
+                    // Se cuenta si la combinación es buena (3+ aciertos)
+                    if (aciertosEnCombinacion >= 3) {
+                        // Simulamos que podría haber acertado el reintegro
+                        // (en la realidad el usuario elige el reintegro)
                     }
                     
                     if (aciertosEnCombinacion > mejorAcierto) {
@@ -1266,7 +1288,10 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             
             val totalCombinaciones = diasAtras * 5
-            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + aciertos4 * 50.0) / totalCombinaciones * 100
+            // Puntuación mejorada considerando 5 y 6 aciertos
+            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + 
+                             aciertos4 * 50.0 + aciertos5 * 200.0 + aciertos6 * 1000.0 +
+                             aciertosComplementario * 100.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1276,9 +1301,14 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertos5 = aciertos5,
+                aciertos6 = aciertos6,
+                aciertosComplementario = aciertosComplementario,
+                aciertosReintegro = aciertosReintegro,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
-                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2)
+                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2),
+                tipoLoteria = tipoLoteria
             ))
         }
         
@@ -1303,6 +1333,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var aciertos2 = 0
             var aciertos3 = 0
             var aciertos4 = 0
+            var aciertos5 = 0
+            var aciertosEstrella1 = 0  // Al menos 1 estrella
+            var aciertosEstrella2 = 0  // Las 2 estrellas
             var mejorAcierto = 0
             var totalAciertos = 0
             
@@ -1311,19 +1344,31 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 if (historicoHastaMomento.isEmpty()) continue
                 
                 val analisis = analizarEuromillones(historicoHastaMomento, metodo, 5)
-                val sorteoReal = historico[i].numeros.toSet()
+                val sorteoReal = historico[i]
+                val numerosReales = sorteoReal.numeros.toSet()
+                val estrellasReales = sorteoReal.estrellas.toSet()
                 
                 for (combinacion in analisis.combinacionesSugeridas) {
-                    val numerosPredichos = combinacion.numeros.toSet()
-                    val aciertosEnCombinacion = numerosPredichos.intersect(sorteoReal).size
+                    val numerosPredichos = combinacion.numeros.take(5).toSet()
+                    val estrellasPredichas = if (combinacion.numeros.size > 5) {
+                        combinacion.numeros.drop(5).toSet()
+                    } else emptySet()
+                    
+                    val aciertosEnCombinacion = numerosPredichos.intersect(numerosReales).size
+                    val aciertosEstrellas = estrellasPredichas.intersect(estrellasReales).size
                     
                     when (aciertosEnCombinacion) {
                         0 -> aciertos0++
                         1 -> aciertos1++
                         2 -> aciertos2++
                         3 -> aciertos3++
-                        else -> aciertos4++
+                        4 -> aciertos4++
+                        5 -> aciertos5++
                     }
+                    
+                    // Contar aciertos de estrellas
+                    if (aciertosEstrellas >= 1) aciertosEstrella1++
+                    if (aciertosEstrellas >= 2) aciertosEstrella2++
                     
                     if (aciertosEnCombinacion > mejorAcierto) mejorAcierto = aciertosEnCombinacion
                     totalAciertos += aciertosEnCombinacion
@@ -1331,7 +1376,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             
             val totalCombinaciones = diasAtras * 5
-            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + aciertos4 * 50.0) / totalCombinaciones * 100
+            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + 
+                             aciertos4 * 50.0 + aciertos5 * 500.0 +
+                             aciertosEstrella1 * 10.0 + aciertosEstrella2 * 50.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1341,9 +1388,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertos5 = aciertos5,
+                aciertosEstrella1 = aciertosEstrella1,
+                aciertosEstrella2 = aciertosEstrella2,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
-                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2)
+                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2),
+                tipoLoteria = "EUROMILLONES"
             ))
         }
         
@@ -1367,6 +1418,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var aciertos2 = 0
             var aciertos3 = 0
             var aciertos4 = 0
+            var aciertos5 = 0
+            var aciertosClave = 0
             var mejorAcierto = 0
             var totalAciertos = 0
             
@@ -1375,18 +1428,27 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 if (historicoHastaMomento.isEmpty()) continue
                 
                 val analisis = analizarGordoPrimitiva(historicoHastaMomento, metodo, 5)
-                val sorteoReal = historico[i].numeros.toSet()
+                val sorteoReal = historico[i]
+                val numerosReales = sorteoReal.numeros.toSet()
+                val claveReal = sorteoReal.numeroClave
                 
                 for (combinacion in analisis.combinacionesSugeridas) {
-                    val numerosPredichos = combinacion.numeros.toSet()
-                    val aciertosEnCombinacion = numerosPredichos.intersect(sorteoReal).size
+                    val numerosPredichos = combinacion.numeros.take(5).toSet()
+                    val aciertosEnCombinacion = numerosPredichos.intersect(numerosReales).size
                     
                     when (aciertosEnCombinacion) {
                         0 -> aciertos0++
                         1 -> aciertos1++
                         2 -> aciertos2++
                         3 -> aciertos3++
-                        else -> aciertos4++
+                        4 -> aciertos4++
+                        5 -> aciertos5++
+                    }
+                    
+                    // Verificar si también acertó el número clave
+                    // (el número clave suele ser el último en la combinación si se incluye)
+                    if (combinacion.numeros.size > 5 && combinacion.numeros.last() == claveReal) {
+                        aciertosClave++
                     }
                     
                     if (aciertosEnCombinacion > mejorAcierto) mejorAcierto = aciertosEnCombinacion
@@ -1395,7 +1457,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             
             val totalCombinaciones = diasAtras * 5
-            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + aciertos4 * 50.0) / totalCombinaciones * 100
+            val puntuacion = (aciertos1 * 1.0 + aciertos2 * 3.0 + aciertos3 * 10.0 + 
+                             aciertos4 * 50.0 + aciertos5 * 300.0 + aciertosClave * 30.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1405,9 +1468,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertos5 = aciertos5,
+                aciertosClave = aciertosClave,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
-                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2)
+                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2),
+                tipoLoteria = "GORDO_PRIMITIVA"
             ))
         }
         
@@ -1420,7 +1486,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     fun ejecutarBacktestNacional(
         historico: List<ResultadoNacional>,
-        diasAtras: Int = 10
+        diasAtras: Int = 10,
+        tipoLoteria: String = "LOTERIA_NACIONAL"
     ): List<ResultadoBacktest> {
         if (historico.size <= diasAtras) return emptyList()
         
@@ -1432,6 +1499,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var aciertos2 = 0  // 2 últimas cifras (terminación)
             var aciertos3 = 0  // 3 últimas cifras
             var aciertos4 = 0  // 4+ cifras o premio completo
+            var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
             
@@ -1442,6 +1510,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val sorteoReal = historico[i]
                 val numeroReal = sorteoReal.primerPremio.filter { it.isDigit() }.toIntOrNull() ?: 0
                 val terminacionReal = numeroReal % 100  // 2 últimas cifras
+                val reintegrosReales = sorteoReal.reintegros.toSet()
                 
                 // Generar predicciones con el histórico de ese momento
                 val terminaciones = historicoHastaMomento.mapNotNull { 
@@ -1461,6 +1530,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                         else -> 0
                     }
                     
+                    // Verificar reintegro (última cifra del número)
+                    val ultimaCifraPredicha = terminacionPredicha % 10
+                    if (ultimaCifraPredicha in reintegrosReales) {
+                        aciertosReintegro++
+                    }
+                    
                     when (aciertosEnPrediccion) {
                         0 -> aciertos0++
                         1 -> aciertos1++
@@ -1476,7 +1551,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             
             val totalCombinaciones = diasAtras * 5
             // Para Nacional, el scoring premia más las terminaciones acertadas
-            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0) / totalCombinaciones * 100
+            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
+                             aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1486,9 +1562,11 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertosReintegro = aciertosReintegro,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
-                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2)
+                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2),
+                tipoLoteria = tipoLoteria
             ))
         }
         
@@ -1513,6 +1591,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var aciertos2 = 0  // 2 últimas cifras (terminación)
             var aciertos3 = 0  // 3 últimas cifras
             var aciertos4 = 0  // 4+ cifras
+            var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
             
@@ -1523,6 +1602,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val sorteoReal = historico[i]
                 val gordoReal = sorteoReal.gordo.toIntOrNull() ?: 0
                 val terminacionReal = gordoReal % 100  // 2 últimas cifras
+                val reintegrosReales = sorteoReal.reintegros.toSet()
                 
                 // Generar predicciones con el histórico de ese momento
                 val terminaciones = historicoHastaMomento.mapNotNull { it.gordo.takeLast(2).toIntOrNull() }
@@ -1539,6 +1619,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                         else -> 0
                     }
                     
+                    // Verificar reintegro
+                    val ultimaCifraPredicha = terminacionPredicha % 10
+                    if (ultimaCifraPredicha in reintegrosReales) {
+                        aciertosReintegro++
+                    }
+                    
                     when (aciertosEnPrediccion) {
                         0 -> aciertos0++
                         1 -> aciertos1++
@@ -1553,7 +1639,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             
             val totalCombinaciones = diasAtras * 5
-            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0) / totalCombinaciones * 100
+            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
+                             aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1563,9 +1650,11 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertosReintegro = aciertosReintegro,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
-                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2)
+                promedioAciertos = (totalAciertos.toDouble() / totalCombinaciones).roundTo(2),
+                tipoLoteria = "NAVIDAD"
             ))
         }
         

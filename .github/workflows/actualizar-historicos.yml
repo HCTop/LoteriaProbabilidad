@@ -1,17 +1,12 @@
 name: Actualizar Históricos de Loterías
 
 on:
-  # Ejecutar cada día a las 23:00 UTC (00:00 hora España)
+  # Ejecutar cada día a las 00:30 hora España (22:30 UTC en invierno, 21:30 en verano)
   schedule:
-    - cron: '0 23 * * *'
+    - cron: '30 22 * * *'
   
   # También permitir ejecución manual
   workflow_dispatch:
-    inputs:
-      desde_anio:
-        description: 'Año desde el que generar datos'
-        required: false
-        default: '1985'
 
 jobs:
   actualizar-datos:
@@ -28,26 +23,41 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Instalar dependencias
+      - name: Mostrar información del sistema
         run: |
-          python -m pip install --upgrade pip
-          # Si necesitas dependencias adicionales, añádelas aquí
-          # pip install requests beautifulsoup4
+          echo "📅 Fecha actual: $(date)"
+          echo "🐍 Python: $(python --version)"
+          echo "📁 Directorio: $(pwd)"
       
-      - name: Ejecutar script de actualización
+      - name: Ejecutar script de descarga
         run: |
           cd scripts
-          python descargar_historicos.py --all --desde ${{ github.event.inputs.desde_anio || '1985' }}
+          python descargar_historicos.py --all
+        timeout-minutes: 30
+      
+      - name: Verificar archivos generados
+        run: |
+          echo "📊 Archivos CSV generados:"
+          ls -la app/src/main/res/raw/*.csv 2>/dev/null || echo "No se encontraron archivos"
+          echo ""
+          echo "📈 Conteo de líneas por archivo:"
+          for csv in app/src/main/res/raw/*.csv; do
+            if [ -f "$csv" ]; then
+              NOMBRE=$(basename "$csv")
+              LINEAS=$(wc -l < "$csv")
+              echo "  $NOMBRE: $LINEAS líneas"
+            fi
+          done
       
       - name: Verificar cambios en los CSV
         id: verify
         run: |
-          if git diff --quiet app/src/main/res/raw/*.csv; then
+          if git diff --quiet app/src/main/res/raw/*.csv 2>/dev/null; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No hay cambios en los datos"
+            echo "📭 No hay cambios en los datos"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Se detectaron cambios en los CSV"
+            echo "📬 Se detectaron cambios en los CSV"
             git diff --stat app/src/main/res/raw/*.csv
           fi
       
@@ -60,9 +70,10 @@ jobs:
           # Añadir solo los CSV actualizados
           git add app/src/main/res/raw/*.csv
           
-          # Crear commit con fecha
-          FECHA=$(date +'%Y-%m-%d')
-          git commit -m "📊 Actualización automática de históricos - $FECHA"
+          # Crear commit con fecha y hora
+          FECHA=$(date +'%Y-%m-%d %H:%M')
+          git commit -m "📊 Actualización automática de históricos - $FECHA" \
+                     -m "Datos descargados de fuentes oficiales"
           
           # Push al repositorio
           git push
@@ -71,10 +82,20 @@ jobs:
         run: |
           echo "## 📊 Resumen de Actualización" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Archivo | Líneas |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "**Fecha:** $(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Archivo | Sorteos |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
           for csv in app/src/main/res/raw/*.csv; do
-            NOMBRE=$(basename $csv)
-            LINEAS=$(wc -l < $csv)
-            echo "| $NOMBRE | $LINEAS |" >> $GITHUB_STEP_SUMMARY
+            if [ -f "$csv" ]; then
+              NOMBRE=$(basename "$csv")
+              LINEAS=$(($(wc -l < "$csv") - 1))
+              echo "| $NOMBRE | $LINEAS |" >> $GITHUB_STEP_SUMMARY
+            fi
           done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.verify.outputs.changed }}" == "true" ]; then
+            echo "✅ **Datos actualizados correctamente**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **Sin cambios detectados**" >> $GITHUB_STEP_SUMMARY
+          fi

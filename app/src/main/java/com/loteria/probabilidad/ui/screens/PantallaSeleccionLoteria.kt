@@ -5,16 +5,25 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.loteria.probabilidad.data.model.TipoLoteria
 import com.loteria.probabilidad.ui.components.DisclaimerCard
 import com.loteria.probabilidad.ui.components.LoteriaButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 
 /**
  * Pantalla principal con la selección de loterías.
@@ -26,6 +35,11 @@ fun PantallaSeleccionLoteria(
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    var descargando by remember { mutableStateOf(false) }
+    var mensajeDescarga by remember { mutableStateOf<String?>(null) }
     
     Scaffold(
         topBar = {
@@ -136,6 +150,123 @@ fun PantallaSeleccionLoteria(
                 tipoLoteria = TipoLoteria.NINO,
                 onClick = { onLoteriaSeleccionada(TipoLoteria.NINO) }
             )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Botón de descarga forzada de CSV
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "📊 Datos Históricos",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    Text(
+                        "Los datos se cargan automáticamente desde los recursos de la app. " +
+                        "Si tienes problemas, puedes verificar los datos.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    
+                    // Mostrar mensaje de estado
+                    mensajeDescarga?.let { mensaje ->
+                        Text(
+                            mensaje,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (mensaje.contains("✅")) MaterialTheme.colorScheme.primary 
+                                   else if (mensaje.contains("❌")) MaterialTheme.colorScheme.error
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                descargando = true
+                                mensajeDescarga = "🔄 Verificando datos..."
+                                
+                                withContext(Dispatchers.IO) {
+                                    try {
+                                        // Verificar que los CSV existen en resources
+                                        val csvFiles = listOf(
+                                            "historico_primitiva.csv",
+                                            "historico_bonoloto.csv",
+                                            "historico_euromillones.csv",
+                                            "historico_gordo_primitiva.csv",
+                                            "historico_loteria_nacional.csv",
+                                            "historico_navidad.csv",
+                                            "historico_nino.csv"
+                                        )
+                                        
+                                        var totalLineas = 0
+                                        var archivosOk = 0
+                                        
+                                        for (csvFile in csvFiles) {
+                                            try {
+                                                val resourceName = csvFile.replace(".csv", "")
+                                                val resId = context.resources.getIdentifier(
+                                                    resourceName, "raw", context.packageName
+                                                )
+                                                if (resId != 0) {
+                                                    val inputStream = context.resources.openRawResource(resId)
+                                                    val lines = inputStream.bufferedReader().readLines().size
+                                                    inputStream.close()
+                                                    totalLineas += lines
+                                                    archivosOk++
+                                                }
+                                            } catch (e: Exception) {
+                                                // Archivo no encontrado
+                                            }
+                                        }
+                                        
+                                        withContext(Dispatchers.Main) {
+                                            mensajeDescarga = if (archivosOk == csvFiles.size) {
+                                                "✅ $archivosOk archivos verificados, $totalLineas sorteos totales"
+                                            } else {
+                                                "⚠️ $archivosOk/${csvFiles.size} archivos, $totalLineas sorteos"
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        withContext(Dispatchers.Main) {
+                                            mensajeDescarga = "❌ Error: ${e.message}"
+                                        }
+                                    }
+                                }
+                                
+                                descargando = false
+                            }
+                        },
+                        enabled = !descargando,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (descargando) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Verificando...")
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Verificar datos históricos")
+                        }
+                    }
+                }
+            }
             
             Spacer(modifier = Modifier.height(16.dp))
         }
