@@ -66,7 +66,10 @@ enum class TipoLoteria(
         diasSorteo = "6 de Enero",
         maxNumero = 99999,
         cantidadNumeros = 1
-    )
+    );
+    
+    // Alias para facilitar uso
+    val nombre: String get() = displayName
 }
 
 /**
@@ -239,8 +242,11 @@ data class AnalisisProbabilidad(
     val complementariosMasFrequentes: List<EstadisticaNumero> = emptyList(),
     val fechaDesde: String? = null,
     val fechaHasta: String? = null,
-    val probabilidadTeorica: String = "",  // Para mostrar la probabilidad según Laplace
-    val fechaUltimoSorteo: String? = null  // Fecha del sorteo más reciente en los datos
+    val probabilidadTeorica: String = "",
+    val fechaUltimoSorteo: String? = null,
+    // Análisis de frecuencia por posición para loterías de 5 dígitos (Nacional, Navidad, Niño)
+    // Map<NombrePosicion, List<Pair<Digito, Porcentaje>>>
+    val analisisPorPosicion: Map<String, List<Pair<Int, Double>>> = emptyMap()
 )
 
 /**

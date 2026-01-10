@@ -131,7 +131,7 @@ Esta aplicación es solo para entretenimiento y análisis estadístico.
 
 ## 📄 Licencia
 
-Licencia de uso privativo.
+MIT License - Uso libre para fines educativos y personales.
 
 ## 🔗 Fuentes de datos
 

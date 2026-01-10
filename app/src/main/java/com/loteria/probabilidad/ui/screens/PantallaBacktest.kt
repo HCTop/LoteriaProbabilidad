@@ -4,12 +4,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,13 +23,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
 import com.loteria.probabilidad.domain.ml.MemoriaIA
 import com.loteria.probabilidad.domain.ml.ResumenIA
+import com.loteria.probabilidad.service.AprendizajeService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -217,72 +225,79 @@ fun PantallaBacktest(
                                         addLog("🏆 Mejor método: ${mejorMetodo.metodo.name} con ${mejorMetodo.puntuacionTotal} pts")
                                     }
                                     
-                                    // 2. APRENDER de los resultados (solo para loterías con números)
-                                    if (tipoLoteria in listOf(TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO, 
-                                        TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA)) {
-                                        aprendiendo = true
-                                        addLog("🧠 Iniciando aprendizaje...")
-                                        
-                                        withContext(Dispatchers.Default) {
-                                            // Convertir histórico al formato común para aprendizaje
-                                            val historicoComun: List<ResultadoPrimitiva> = when (tipoLoteria) {
-                                                TipoLoteria.PRIMITIVA -> historicoPrimitiva
-                                                TipoLoteria.BONOLOTO -> historicoBonoloto
-                                                TipoLoteria.EUROMILLONES -> historicoEuromillones.map { 
-                                                    ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) 
-                                                }
-                                                TipoLoteria.GORDO_PRIMITIVA -> historicoGordo.map { 
-                                                    ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) 
-                                                }
-                                                else -> emptyList()
+                                    // 2. APRENDER de los resultados (TODAS las loterías)
+                                    aprendiendo = true
+                                    addLog("🧠 Iniciando aprendizaje...")
+                                    
+                                    withContext(Dispatchers.Default) {
+                                        // Convertir histórico al formato común para aprendizaje
+                                        val historicoComun: List<ResultadoPrimitiva> = when (tipoLoteria) {
+                                            TipoLoteria.PRIMITIVA -> historicoPrimitiva
+                                            TipoLoteria.BONOLOTO -> historicoBonoloto
+                                            TipoLoteria.EUROMILLONES -> historicoEuromillones.map { 
+                                                ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) 
                                             }
-                                            addLog("📚 Histórico preparado: ${historicoComun.size} sorteos")
-                                            
-                                            if (historicoComun.isNotEmpty()) {
-                                                calculador.aprenderDeBacktest(
-                                                    resultados = resultados,
-                                                    historico = historicoComun,
-                                                    tipoLoteria = tipoLoteria.name,
-                                                    sorteosProbados = diasAtras.toInt()
-                                                )
-                                                addLog("✅ Aprendizaje ejecutado para ${tipoLoteria.displayName}")
-                                            } else {
-                                                addLog("⚠️ Histórico vacío - No se puede aprender")
+                                            TipoLoteria.GORDO_PRIMITIVA -> historicoGordo.map { 
+                                                ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) 
+                                            }
+                                            // Para Nacional/Navidad/Niño: convertir número de 5 dígitos a lista de dígitos
+                                            TipoLoteria.LOTERIA_NACIONAL -> historicoNacional.map { nac ->
+                                                val digitos = nac.primerPremio.padStart(5, '0').map { it.digitToInt() }
+                                                ResultadoPrimitiva(nac.fecha, digitos, 0, 0)
+                                            }
+                                            TipoLoteria.NAVIDAD -> historicoNavidad.map { nav ->
+                                                val digitos = nav.gordo.padStart(5, '0').map { it.digitToInt() }
+                                                ResultadoPrimitiva(nav.fecha, digitos, 0, 0)
+                                            }
+                                            TipoLoteria.NINO -> historicoNino.map { nino ->
+                                                val digitos = nino.primerPremio.padStart(5, '0').map { it.digitToInt() }
+                                                ResultadoPrimitiva(nino.fecha, digitos, 0, 0)
                                             }
                                         }
+                                        addLog("📚 Histórico preparado: ${historicoComun.size} sorteos")
                                         
-                                        // Verificar estado DESPUÉS (específico de esta lotería)
-                                        resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
-                                        val entrenamientosDespues = memoriaIA.obtenerTotalEntrenamientos(tipoLoteria.name)
-                                        val mejorPuntuacionDespues = memoriaIA.obtenerMejorPuntuacion(tipoLoteria.name)
-                                        val pesosDespues = memoriaIA.obtenerPesosCaracteristicas(tipoLoteria.name)
-                                        
-                                        addLog("📝 Estado DESPUÉS - Entrenamientos: $entrenamientosDespues, Mejor: $mejorPuntuacionDespues")
-                                        
-                                        // Verificar si realmente cambió
-                                        if (entrenamientosDespues > entrenamientosAntes) {
-                                            addLog("✅ ¡APRENDIZAJE EXITOSO! Entrenamientos: $entrenamientosAntes → $entrenamientosDespues")
+                                        if (historicoComun.isNotEmpty()) {
+                                            calculador.aprenderDeBacktest(
+                                                resultados = resultados,
+                                                historico = historicoComun,
+                                                tipoLoteria = tipoLoteria.name,
+                                                sorteosProbados = diasAtras.toInt()
+                                            )
+                                            addLog("✅ Aprendizaje ejecutado para ${tipoLoteria.displayName}")
                                         } else {
-                                            addLog("❌ ERROR: Contador no aumentó ($entrenamientosAntes → $entrenamientosDespues)")
+                                            addLog("⚠️ Histórico vacío - No se puede aprender")
                                         }
-                                        
-                                        // Mostrar cambios en pesos
-                                        val cambiosPesos = pesosDespues.filter { (k, v) ->
-                                            val antes = pesosAntes[k] ?: 0.0
-                                            kotlin.math.abs(v - antes) > 0.001
-                                        }
-                                        if (cambiosPesos.isNotEmpty()) {
-                                            addLog("📊 Pesos modificados:")
-                                            cambiosPesos.forEach { (k, v) ->
-                                                val antes = pesosAntes[k] ?: 0.0
-                                                addLog("   $k: ${(antes*100).toInt()}% → ${(v*100).toInt()}%")
-                                            }
-                                        }
-                                        
-                                        aprendiendo = false
-                                    } else {
-                                        addLog("ℹ️ ${tipoLoteria.displayName} no soporta aprendizaje de IA (números fijos de 5 dígitos)")
                                     }
+                                    
+                                    // Verificar estado DESPUÉS (específico de esta lotería)
+                                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                                    val entrenamientosDespues = memoriaIA.obtenerTotalEntrenamientos(tipoLoteria.name)
+                                    val mejorPuntuacionDespues = memoriaIA.obtenerMejorPuntuacion(tipoLoteria.name)
+                                    val pesosDespues = memoriaIA.obtenerPesosCaracteristicas(tipoLoteria.name)
+                                    
+                                    addLog("📝 Estado DESPUÉS - Entrenamientos: $entrenamientosDespues, Mejor: $mejorPuntuacionDespues")
+                                    
+                                    // Verificar si realmente cambió
+                                    if (entrenamientosDespues > entrenamientosAntes) {
+                                        addLog("✅ ¡APRENDIZAJE EXITOSO! Entrenamientos: $entrenamientosAntes → $entrenamientosDespues")
+                                    } else {
+                                        addLog("❌ ERROR: Contador no aumentó ($entrenamientosAntes → $entrenamientosDespues)")
+                                    }
+                                    
+                                    // Mostrar cambios en pesos
+                                    val cambiosPesos = pesosDespues.filter { (k, v) ->
+                                        val antes = pesosAntes[k] ?: 0.0
+                                        kotlin.math.abs(v - antes) > 0.001
+                                    }
+                                    if (cambiosPesos.isNotEmpty()) {
+                                        addLog("📊 Pesos modificados:")
+                                        cambiosPesos.forEach { (k, v) ->
+                                            val antes = pesosAntes[k] ?: 0.0
+                                            addLog("   $k: ${(antes*100).toInt()}% → ${(v*100).toInt()}%")
+                                        }
+                                    }
+                                    
+                                    aprendiendo = false
                                 }
                             },
                             enabled = !ejecutando && !aprendiendo,
@@ -308,6 +323,127 @@ fun PantallaBacktest(
                                 Text("Ejecutar Backtesting + Aprender")
                             }
                         }
+                        
+                        // Sección de aprendizaje en segundo plano (TODAS las loterías)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Divider()
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            "🌙 Aprendizaje en Segundo Plano",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Ejecuta múltiples iteraciones incluso con la pantalla apagada",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            var iteraciones by remember { mutableStateOf(50f) }
+                            var servicioActivo by remember { mutableStateOf(AprendizajeService.isRunning) }
+                            var ultimoProgresoLogueado by remember { mutableStateOf(-1) }
+                            
+                            // Actualizar estado del servicio periódicamente (solo logear cada 5%)
+                            LaunchedEffect(Unit) {
+                                while(true) {
+                                    delay(2000) // Cada 2 segundos
+                                    servicioActivo = AprendizajeService.isRunning
+                                    if (servicioActivo) {
+                                        val progresoActual = AprendizajeService.progreso
+                                        // Solo logear si el progreso cambió en al menos 5%
+                                        if (progresoActual >= ultimoProgresoLogueado + 5 || progresoActual == 100) {
+                                            ultimoProgresoLogueado = progresoActual
+                                            addLog("🔄 ${progresoActual}% - It. ${AprendizajeService.iteracionActual}/${AprendizajeService.totalIteraciones}")
+                                        }
+                                    } else {
+                                        ultimoProgresoLogueado = -1
+                                    }
+                                }
+                            }
+                            
+                            if (servicioActivo) {
+                                // Mostrar progreso del servicio
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            "🧠 Aprendiendo en segundo plano...",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        LinearProgressIndicator(
+                                            progress = AprendizajeService.progreso / 100f,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            "Iteración ${AprendizajeService.iteracionActual} de ${AprendizajeService.totalIteraciones} (${AprendizajeService.progreso}%)",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                        Text(
+                                            AprendizajeService.ultimoLog,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedButton(
+                                            onClick = {
+                                                AprendizajeService.stopLearning(context)
+                                                addLog("⏹️ Aprendizaje detenido manualmente")
+                                            },
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error
+                                            )
+                                        ) {
+                                            Text("⏹️ Detener")
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Controles para iniciar
+                                Text("Iteraciones: ${iteraciones.toInt()}")
+                                Slider(
+                                    value = iteraciones,
+                                    onValueChange = { iteraciones = it },
+                                    valueRange = 10f..500f,
+                                    steps = 48,  // 10, 20, 30... hasta 500
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                
+                                Button(
+                                    onClick = {
+                                        AprendizajeService.startLearning(
+                                            context = context,
+                                            tipoLoteria = tipoLoteria.name,
+                                            sorteos = diasAtras.toInt(),
+                                            iteraciones = iteraciones.toInt()
+                                        )
+                                        addLog("🚀 Iniciando ${iteraciones.toInt()} iteraciones en segundo plano")
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondary
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Schedule, null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Iniciar ${iteraciones.toInt()} iteraciones (segundo plano)")
+                                }
+                                
+                                Text(
+                                    "💡 Puedes apagar la pantalla y el aprendizaje continuará",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                     }
                 }
             }
@@ -388,6 +524,11 @@ fun PantallaBacktest(
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF00FF00)
                                     )
+                                    Text(
+                                        "(${logs.size})",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
                                 }
                                 IconButton(
                                     onClick = { logs = listOf() },
@@ -404,26 +545,45 @@ fun PantallaBacktest(
                             
                             Spacer(modifier = Modifier.height(8.dp))
                             
-                            // Mostrar logs
-                            Column {
-                                logs.takeLast(20).forEach { log ->
-                                    val color = when {
-                                        log.contains("✅") -> Color(0xFF00FF00)
-                                        log.contains("❌") || log.contains("ERROR") -> Color(0xFFFF4444)
-                                        log.contains("⚠️") -> Color(0xFFFFAA00)
-                                        log.contains("🚀") || log.contains("🧠") -> Color(0xFF00AAFF)
-                                        log.contains("📊") || log.contains("📝") -> Color(0xFFAAAAFF)
-                                        log.contains("🤖") || log.contains("🏆") -> Color(0xFFFFD700)
-                                        else -> Color(0xFFCCCCCC)
+                            // Mostrar logs con SCROLL y altura fija
+                            val scrollState = rememberScrollState()
+                            
+                            // Auto-scroll al final cuando hay nuevos logs
+                            LaunchedEffect(logs.size) {
+                                scrollState.animateScrollTo(scrollState.maxValue)
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp) // Altura fija
+                                    .background(Color(0xFF0D0D1A), RoundedCornerShape(4.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(scrollState)
+                                ) {
+                                    logs.forEach { log ->
+                                        val color = when {
+                                            log.contains("✅") -> Color(0xFF00FF00)
+                                            log.contains("❌") || log.contains("ERROR") -> Color(0xFFFF4444)
+                                            log.contains("⚠️") -> Color(0xFFFFAA00)
+                                            log.contains("🚀") || log.contains("🧠") -> Color(0xFF00AAFF)
+                                            log.contains("📊") || log.contains("📝") -> Color(0xFFAAAAFF)
+                                            log.contains("🤖") || log.contains("🏆") || log.contains("🔄") -> Color(0xFFFFD700)
+                                            else -> Color(0xFFCCCCCC)
+                                        }
+                                        Text(
+                                            text = log,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = color,
+                                            modifier = Modifier.padding(vertical = 1.dp)
+                                        )
                                     }
-                                    Text(
-                                        text = log,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = color,
-                                        modifier = Modifier.padding(vertical = 1.dp)
-                                    )
                                 }
                             }
                             
@@ -476,9 +636,7 @@ fun PantallaBacktest(
                             )
                             estadoActual.pesosCaracteristicas.entries
                                 .sortedByDescending { it.value }
-                                .forEach { entry ->
-                                    val car = entry.key
-                                    val peso = entry.value
+                                .forEach { (car, peso) ->
                                     val barLength = (peso * 20).toInt()
                                     val bar = "█".repeat(barLength) + "░".repeat(20 - barLength)
                                     Text(

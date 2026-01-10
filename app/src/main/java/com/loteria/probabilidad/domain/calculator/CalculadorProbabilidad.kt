@@ -311,15 +311,46 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             return crearAnalisisVacio(tipoLoteria, metodo)
         }
 
-        // Analizar terminaciones (últimas 2 cifras)
+        // ==================== ANÁLISIS DE FRECUENCIAS POR POSICIÓN ====================
+        // Cada posición del número de 5 dígitos se analiza independientemente (0-9)
+        // Posición 0: Decenas de millar, Posición 1: Millares, Posición 2: Centenas, 
+        // Posición 3: Decenas, Posición 4: Unidades
+        
+        val frecuenciasPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
+        val frecuenciasRecientesPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
+        
+        // Inicializar con ceros
+        for (pos in 0..4) {
+            for (digito in 0..9) {
+                frecuenciasPorPosicion[pos][digito] = 0
+                frecuenciasRecientesPorPosicion[pos][digito] = 0
+            }
+        }
+        
+        // Contar frecuencias de cada dígito en cada posición
+        historico.forEach { resultado ->
+            val numero = resultado.primerPremio.padStart(5, '0')
+            numero.forEachIndexed { posicion, char ->
+                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
+                frecuenciasPorPosicion[posicion][digito] = 
+                    (frecuenciasPorPosicion[posicion][digito] ?: 0) + 1
+            }
+        }
+        
+        // Contar frecuencias recientes (últimos 50 sorteos)
+        historico.take(50).forEach { resultado ->
+            val numero = resultado.primerPremio.padStart(5, '0')
+            numero.forEachIndexed { posicion, char ->
+                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
+                frecuenciasRecientesPorPosicion[posicion][digito] = 
+                    (frecuenciasRecientesPorPosicion[posicion][digito] ?: 0) + 1
+            }
+        }
+        
+        // Análisis de terminaciones (últimas 2 cifras) para compatibilidad
         val terminaciones = historico.mapNotNull { it.primerPremio.takeLast(2).toIntOrNull() }
         val frecuenciasTerminaciones = contarFrecuencias(terminaciones, 0..99)
         val frecuenciasReintegros = contarFrecuencias(historico.flatMap { it.reintegros }, 0..9)
-
-        // Obtener terminaciones ordenadas por frecuencia
-        val terminacionesOrdenadas = frecuenciasTerminaciones.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
 
         val combinaciones = when (metodo) {
             MetodoCalculo.LAPLACE, MetodoCalculo.ALEATORIO_PURO -> {
@@ -328,23 +359,79 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = 0.001,
-                        explicacion = "Número: ${numero.toString().padStart(5, '0')}"
+                        explicacion = "🎲 Aleatorio: ${numero.toString().padStart(5, '0')}"
                     )
                 }
             }
+            MetodoCalculo.FRECUENCIAS -> {
+                // Usar el dígito MÁS FRECUENTE en cada posición
+                generarNumerosOptimos(
+                    frecuenciasPorPosicion, 
+                    numCombinaciones, 
+                    historico.size,
+                    "📊 Frecuencias",
+                    seleccionarMasFrecuentes = true
+                )
+            }
+            MetodoCalculo.NUMEROS_CALIENTES -> {
+                // Usar dígitos más frecuentes en los últimos 50 sorteos
+                generarNumerosOptimos(
+                    frecuenciasRecientesPorPosicion, 
+                    numCombinaciones, 
+                    minOf(50, historico.size),
+                    "🔥 Calientes",
+                    seleccionarMasFrecuentes = true
+                )
+            }
+            MetodoCalculo.NUMEROS_FRIOS -> {
+                // Usar dígitos MENOS frecuentes (teoría del equilibrio)
+                generarNumerosOptimos(
+                    frecuenciasPorPosicion, 
+                    numCombinaciones, 
+                    historico.size,
+                    "❄️ Fríos",
+                    seleccionarMasFrecuentes = false
+                )
+            }
+            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
+                // Mezcla: 3 posiciones frecuentes, 2 posiciones frías
+                generarNumerosMixtos(
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
+                    historico.size
+                )
+            }
+            MetodoCalculo.DESVIACION_MEDIA -> {
+                // Dígitos más alejados de la media esperada (10%)
+                generarNumerosDesviacion(
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
+                    historico.size
+                )
+            }
             else -> {
-                // Usar terminaciones DIFERENTES para cada combinación
+                // Por defecto: usar terminaciones + dígitos frecuentes
+                val terminacionesOrdenadas = frecuenciasTerminaciones.entries
+                    .sortedByDescending { it.value }
+                    .map { it.key }
+                    
                 (0 until numCombinaciones).map { index ->
                     val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).random() }
                     val frecuencia = frecuenciasTerminaciones[terminacion] ?: 0
-                    val prefijo = (0..999).random()
+                    
+                    // Generar prefijo usando dígitos frecuentes
+                    val dig0 = obtenerDigitoTop(frecuenciasPorPosicion[0], index)
+                    val dig1 = obtenerDigitoTop(frecuenciasPorPosicion[1], index)
+                    val dig2 = obtenerDigitoTop(frecuenciasPorPosicion[2], index)
+                    val prefijo = dig0 * 100 + dig1 * 10 + dig2
+                    
                     val numero = prefijo * 100 + terminacion
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = if (historico.isNotEmpty()) {
                             (frecuencia.toDouble() / historico.size * 100).roundTo(2)
                         } else 0.001,
-                        explicacion = "Número: ${numero.toString().padStart(5, '0')} | Terminación: ${terminacion.toString().padStart(2, '0')} (${frecuencia}x)"
+                        explicacion = "🎯 Número: ${numero.toString().padStart(5, '0')} | Term: ${terminacion.toString().padStart(2, '0')} (${frecuencia}x)"
                     )
                 }
             }
@@ -363,8 +450,204 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             numerosMenosFrequentes = obtenerTopNumeros(frecuenciasTerminaciones, 10, historico.size, menosFrecuentes = true),
             complementariosMasFrequentes = obtenerTopNumeros(frecuenciasReintegros, 5, historico.size),
             probabilidadTeorica = probabilidadTeorica,
-            fechaUltimoSorteo = fechaUltimoSorteo
+            fechaUltimoSorteo = fechaUltimoSorteo,
+            analisisPorPosicion = crearAnalisisPorPosicion(frecuenciasPorPosicion, historico.size)
         )
+    }
+    
+    // ==================== FUNCIONES AUXILIARES PARA ANÁLISIS DE DÍGITOS ====================
+    
+    /**
+     * Genera números usando los dígitos más/menos frecuentes por posición.
+     */
+    private fun generarNumerosOptimos(
+        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
+        numCombinaciones: Int,
+        totalSorteos: Int,
+        prefijo: String,
+        seleccionarMasFrecuentes: Boolean
+    ): List<CombinacionSugerida> {
+        val combinaciones = mutableListOf<CombinacionSugerida>()
+        val numerosGenerados = mutableSetOf<Int>()
+        
+        repeat(numCombinaciones) { index ->
+            var numero: Int
+            var intentos = 0
+            
+            do {
+                val digitos = (0..4).map { pos ->
+                    obtenerDigitoRanked(frecuenciasPorPosicion[pos], index + intentos, seleccionarMasFrecuentes)
+                }
+                numero = digitos[0] * 10000 + digitos[1] * 1000 + digitos[2] * 100 + digitos[3] * 10 + digitos[4]
+                intentos++
+            } while (numero in numerosGenerados && intentos < 20)
+            
+            numerosGenerados.add(numero)
+            
+            // Calcular puntuación basada en frecuencias
+            val puntuacion = calcularPuntuacionNumero(numero, frecuenciasPorPosicion, totalSorteos)
+            
+            combinaciones.add(CombinacionSugerida(
+                numeros = listOf(numero),
+                probabilidadRelativa = puntuacion,
+                explicacion = "$prefijo: ${numero.toString().padStart(5, '0')} | Score: ${puntuacion.roundTo(1)}%"
+            ))
+        }
+        
+        return combinaciones
+    }
+    
+    /**
+     * Genera números mixtos: algunas posiciones frecuentes, otras frías.
+     */
+    private fun generarNumerosMixtos(
+        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
+        numCombinaciones: Int,
+        totalSorteos: Int
+    ): List<CombinacionSugerida> {
+        val combinaciones = mutableListOf<CombinacionSugerida>()
+        val numerosGenerados = mutableSetOf<Int>()
+        
+        repeat(numCombinaciones) { index ->
+            var numero: Int
+            var intentos = 0
+            
+            do {
+                // Alternar: posiciones 0,2,4 frecuentes, posiciones 1,3 frías
+                val digitos = (0..4).map { pos ->
+                    val usarFrecuente = (pos + index) % 2 == 0
+                    obtenerDigitoRanked(frecuenciasPorPosicion[pos], index + intentos, usarFrecuente)
+                }
+                numero = digitos[0] * 10000 + digitos[1] * 1000 + digitos[2] * 100 + digitos[3] * 10 + digitos[4]
+                intentos++
+            } while (numero in numerosGenerados && intentos < 20)
+            
+            numerosGenerados.add(numero)
+            val puntuacion = calcularPuntuacionNumero(numero, frecuenciasPorPosicion, totalSorteos)
+            
+            combinaciones.add(CombinacionSugerida(
+                numeros = listOf(numero),
+                probabilidadRelativa = puntuacion,
+                explicacion = "⚖️ Equilibrio: ${numero.toString().padStart(5, '0')} | Score: ${puntuacion.roundTo(1)}%"
+            ))
+        }
+        
+        return combinaciones
+    }
+    
+    /**
+     * Genera números basándose en la desviación de la media esperada.
+     */
+    private fun generarNumerosDesviacion(
+        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
+        numCombinaciones: Int,
+        totalSorteos: Int
+    ): List<CombinacionSugerida> {
+        val mediaEsperada = totalSorteos / 10.0 // Cada dígito debería aparecer 10% de las veces
+        
+        // Para cada posición, calcular desviación de cada dígito
+        val desviacionesPorPosicion = Array(5) { pos ->
+            frecuenciasPorPosicion[pos].map { (digito, freq) ->
+                digito to kotlin.math.abs(freq - mediaEsperada)
+            }.sortedByDescending { it.second }
+        }
+        
+        val combinaciones = mutableListOf<CombinacionSugerida>()
+        val numerosGenerados = mutableSetOf<Int>()
+        
+        repeat(numCombinaciones) { index ->
+            var numero: Int
+            var intentos = 0
+            
+            do {
+                val digitos = (0..4).map { pos ->
+                    desviacionesPorPosicion[pos].getOrNull(index + intentos)?.first ?: (0..9).random()
+                }
+                numero = digitos[0] * 10000 + digitos[1] * 1000 + digitos[2] * 100 + digitos[3] * 10 + digitos[4]
+                intentos++
+            } while (numero in numerosGenerados && intentos < 20)
+            
+            numerosGenerados.add(numero)
+            val puntuacion = calcularPuntuacionNumero(numero, frecuenciasPorPosicion, totalSorteos)
+            
+            combinaciones.add(CombinacionSugerida(
+                numeros = listOf(numero),
+                probabilidadRelativa = puntuacion,
+                explicacion = "📈 Desviación: ${numero.toString().padStart(5, '0')} | Score: ${puntuacion.roundTo(1)}%"
+            ))
+        }
+        
+        return combinaciones
+    }
+    
+    /**
+     * Obtiene el dígito en el ranking especificado.
+     */
+    private fun obtenerDigitoRanked(
+        frecuencias: Map<Int, Int>, 
+        rank: Int, 
+        masFrecuente: Boolean
+    ): Int {
+        val ordenados = if (masFrecuente) {
+            frecuencias.entries.sortedByDescending { it.value }
+        } else {
+            frecuencias.entries.sortedBy { it.value }
+        }
+        return ordenados.getOrNull(rank % 10)?.key ?: (0..9).random()
+    }
+    
+    /**
+     * Obtiene el dígito top para una posición.
+     */
+    private fun obtenerDigitoTop(frecuencias: Map<Int, Int>, offset: Int): Int {
+        val ordenados = frecuencias.entries.sortedByDescending { it.value }
+        return ordenados.getOrNull(offset % 10)?.key ?: (0..9).random()
+    }
+    
+    /**
+     * Calcula la puntuación de un número basándose en las frecuencias históricas.
+     */
+    private fun calcularPuntuacionNumero(
+        numero: Int,
+        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
+        totalSorteos: Int
+    ): Double {
+        if (totalSorteos == 0) return 0.0
+        
+        val numeroStr = numero.toString().padStart(5, '0')
+        var puntuacionTotal = 0.0
+        
+        numeroStr.forEachIndexed { pos, char ->
+            val digito = char.digitToIntOrNull() ?: return@forEachIndexed
+            val frecuencia = frecuenciasPorPosicion[pos][digito] ?: 0
+            puntuacionTotal += (frecuencia.toDouble() / totalSorteos) * 100
+        }
+        
+        return puntuacionTotal / 5 // Promedio de las 5 posiciones
+    }
+    
+    /**
+     * Crea el análisis detallado por posición para mostrar en UI.
+     */
+    private fun crearAnalisisPorPosicion(
+        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
+        totalSorteos: Int
+    ): Map<String, List<Pair<Int, Double>>> {
+        val nombresPosicion = listOf(
+            "Decenas de millar (1ª)",
+            "Millares (2ª)",
+            "Centenas (3ª)",
+            "Decenas (4ª)",
+            "Unidades (5ª)"
+        )
+        
+        return nombresPosicion.mapIndexed { pos, nombre ->
+            nombre to frecuenciasPorPosicion[pos].entries
+                .sortedByDescending { it.value }
+                .map { (digito, freq) ->
+                    digito to if (totalSorteos > 0) (freq.toDouble() / totalSorteos * 100) else 0.0
+                }
+        }.toMap()
     }
 
     // ==================== NAVIDAD ====================
@@ -378,14 +661,41 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             return crearAnalisisVacio(TipoLoteria.NAVIDAD, metodo)
         }
 
+        // ==================== ANÁLISIS DE FRECUENCIAS POR POSICIÓN ====================
+        val frecuenciasPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
+        val frecuenciasRecientesPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
+        
+        // Inicializar con ceros
+        for (pos in 0..4) {
+            for (digito in 0..9) {
+                frecuenciasPorPosicion[pos][digito] = 0
+                frecuenciasRecientesPorPosicion[pos][digito] = 0
+            }
+        }
+        
+        // Contar frecuencias de cada dígito en cada posición (El Gordo)
+        historico.forEach { resultado ->
+            val numero = resultado.gordo.padStart(5, '0')
+            numero.forEachIndexed { posicion, char ->
+                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
+                frecuenciasPorPosicion[posicion][digito] = 
+                    (frecuenciasPorPosicion[posicion][digito] ?: 0) + 1
+            }
+        }
+        
+        // Frecuencias recientes (últimos 20 sorteos para Navidad)
+        historico.take(20).forEach { resultado ->
+            val numero = resultado.gordo.padStart(5, '0')
+            numero.forEachIndexed { posicion, char ->
+                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
+                frecuenciasRecientesPorPosicion[posicion][digito] = 
+                    (frecuenciasRecientesPorPosicion[posicion][digito] ?: 0) + 1
+            }
+        }
+
         val terminaciones = historico.mapNotNull { it.gordo.takeLast(2).toIntOrNull() }
         val frecuenciasTerminaciones = contarFrecuencias(terminaciones, 0..99)
         val frecuenciasReintegros = contarFrecuencias(historico.flatMap { it.reintegros }, 0..9)
-
-        // Obtener terminaciones ordenadas por frecuencia
-        val terminacionesOrdenadas = frecuenciasTerminaciones.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
 
         val combinaciones = when (metodo) {
             MetodoCalculo.LAPLACE, MetodoCalculo.ALEATORIO_PURO -> {
@@ -394,23 +704,72 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = 0.001,
-                        explicacion = "Décimo: ${numero.toString().padStart(5, '0')}"
+                        explicacion = "🎲 Aleatorio: ${numero.toString().padStart(5, '0')}"
                     )
                 }
             }
+            MetodoCalculo.FRECUENCIAS -> {
+                generarNumerosOptimos(
+                    frecuenciasPorPosicion, 
+                    numCombinaciones, 
+                    historico.size,
+                    "📊 Frecuencias",
+                    seleccionarMasFrecuentes = true
+                )
+            }
+            MetodoCalculo.NUMEROS_CALIENTES -> {
+                generarNumerosOptimos(
+                    frecuenciasRecientesPorPosicion, 
+                    numCombinaciones, 
+                    minOf(20, historico.size),
+                    "🔥 Calientes",
+                    seleccionarMasFrecuentes = true
+                )
+            }
+            MetodoCalculo.NUMEROS_FRIOS -> {
+                generarNumerosOptimos(
+                    frecuenciasPorPosicion, 
+                    numCombinaciones, 
+                    historico.size,
+                    "❄️ Fríos",
+                    seleccionarMasFrecuentes = false
+                )
+            }
+            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
+                generarNumerosMixtos(
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
+                    historico.size
+                )
+            }
+            MetodoCalculo.DESVIACION_MEDIA -> {
+                generarNumerosDesviacion(
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
+                    historico.size
+                )
+            }
             else -> {
-                // Usar terminaciones DIFERENTES para cada combinación
+                val terminacionesOrdenadas = frecuenciasTerminaciones.entries
+                    .sortedByDescending { it.value }
+                    .map { it.key }
+                    
                 (0 until numCombinaciones).map { index ->
                     val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).random() }
                     val frecuencia = frecuenciasTerminaciones[terminacion] ?: 0
-                    val prefijo = (0..999).random()
+                    
+                    val dig0 = obtenerDigitoTop(frecuenciasPorPosicion[0], index)
+                    val dig1 = obtenerDigitoTop(frecuenciasPorPosicion[1], index)
+                    val dig2 = obtenerDigitoTop(frecuenciasPorPosicion[2], index)
+                    val prefijo = dig0 * 100 + dig1 * 10 + dig2
+                    
                     val numero = prefijo * 100 + terminacion
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = if (historico.isNotEmpty()) {
                             (frecuencia.toDouble() / historico.size * 100).roundTo(2)
                         } else 0.001,
-                        explicacion = "Décimo: ${numero.toString().padStart(5, '0')} | Terminación: ${terminacion.toString().padStart(2, '0')} (${frecuencia}x)"
+                        explicacion = "🎄 Décimo: ${numero.toString().padStart(5, '0')} | Term: ${terminacion.toString().padStart(2, '0')} (${frecuencia}x)"
                     )
                 }
             }
@@ -429,7 +788,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             numerosMenosFrequentes = obtenerTopNumeros(frecuenciasTerminaciones, 10, historico.size, menosFrecuentes = true),
             complementariosMasFrequentes = obtenerTopNumeros(frecuenciasReintegros, 5, historico.size),
             probabilidadTeorica = probabilidadTeorica,
-            fechaUltimoSorteo = fechaUltimoSorteo
+            fechaUltimoSorteo = fechaUltimoSorteo,
+            analisisPorPosicion = crearAnalisisPorPosicion(frecuenciasPorPosicion, historico.size)
         )
     }
 

@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.loteria.probabilidad.data.model.AnalisisProbabilidad
@@ -23,6 +24,14 @@ import com.loteria.probabilidad.data.model.MetodoCalculo
 import com.loteria.probabilidad.data.model.OpcionRangoFechas
 import com.loteria.probabilidad.data.model.TipoLoteria
 import com.loteria.probabilidad.ui.components.*
+import kotlin.math.roundToInt
+
+// Función de extensión para redondear doubles
+private fun Double.roundTo(decimals: Int): Double {
+    var multiplier = 1.0
+    repeat(decimals) { multiplier *= 10 }
+    return kotlin.math.round(this * multiplier) / multiplier
+}
 
 /**
  * Estado de la pantalla de resultados.
@@ -587,6 +596,129 @@ private fun EstadisticasCard(
                                 text = "${estadistica.porcentaje}%",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // ==================== ANÁLISIS POR POSICIÓN DE DÍGITOS ====================
+            // Solo para loterías de 5 dígitos (Nacional, Navidad, Niño)
+            if (analisis.analisisPorPosicion.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Text(
+                    text = "📊 Frecuencia de Dígitos por Posición",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                Text(
+                    text = "Análisis de cada dígito (0-9) en cada posición del número",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                analisis.analisisPorPosicion.forEach { (posicion, digitos) ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(
+                            text = posicion,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Mostrar los 3 dígitos más frecuentes para esta posición
+                            digitos.take(3).forEach { (digito, porcentaje) ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = androidx.compose.foundation.shape.CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "$digito",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${porcentaje.roundTo(1)}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            
+                            // Mostrar los 2 dígitos menos frecuentes (fríos)
+                            Text(
+                                text = "Fríos: ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            digitos.takeLast(2).reversed().forEach { (digito, porcentaje) ->
+                                Text(
+                                    text = "$digito(${porcentaje.roundTo(1)}%) ",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF6699CC)
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Número "óptimo" basado en dígitos más frecuentes
+                val numeroOptimo = analisis.analisisPorPosicion.values
+                    .mapNotNull { it.firstOrNull()?.first }
+                    .joinToString("")
+                    
+                if (numeroOptimo.length == 5) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "🎯 Número Estadísticamente Óptimo",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Dígito más frecuente en cada posición",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
+                                )
+                            }
+                            Text(
+                                text = numeroOptimo,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
                             )
                         }
                     }

@@ -60,6 +60,14 @@ class MotorInteligencia(private val context: Context? = null) {
         val nombreNivel = memoria?.obtenerNombreNivel(tipoLoteria) ?: "🌱 Novato"
         val entrenamientos = memoria?.obtenerTotalEntrenamientos(tipoLoteria) ?: 0
         
+        // Añadir VARIACIÓN al fitness para que cada regeneración sea diferente
+        // Esto evita que siempre salgan las mismas combinaciones "óptimas"
+        val variacionFactor = 0.15 // 15% de variación aleatoria
+        poblacion.forEach { ind ->
+            val variacion = (Random.nextDouble() - 0.5) * 2 * variacionFactor * ind.fitness
+            ind.fitness = (ind.fitness + variacion).coerceAtLeast(0.0)
+        }
+        
         // Seleccionar combinaciones DIVERSAS (no repetir números idénticos)
         val ordenadas = poblacion.sortedByDescending { it.fitness }
         val seleccionadas = mutableListOf<Individuo>()
