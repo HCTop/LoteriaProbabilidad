@@ -1,6 +1,6 @@
 # 🎰 Lotería Probabilidad
 
-**Versión: 2.4.0** | **Última actualización: 2026-01-11 10:40 UTC**
+**Versión: 2.5.3** | **Última actualización: 2026-01-11 17:00 UTC**
 
 Aplicación Android para analizar históricos de loterías españolas y generar combinaciones basadas en diferentes métodos de cálculo de probabilidad, incluyendo IA con algoritmos genéticos.
 

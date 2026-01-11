@@ -57,19 +57,36 @@ fun PantallaBacktest(
     val memoriaIA = remember { MemoriaIA(context) }
     val persistencia = remember { BacktestPersistencia(context) }
     
-    // Límite máximo calculado primero
-    val maxDias = when (tipoLoteria) {
-        TipoLoteria.PRIMITIVA -> (historicoPrimitiva.size - 10).coerceIn(10, 500)
-        TipoLoteria.BONOLOTO -> (historicoBonoloto.size - 10).coerceIn(10, 500)
-        TipoLoteria.EUROMILLONES -> (historicoEuromillones.size - 10).coerceIn(10, 500)
-        TipoLoteria.GORDO_PRIMITIVA -> (historicoGordo.size - 10).coerceIn(10, 500)
-        TipoLoteria.LOTERIA_NACIONAL -> (historicoNacional.size - 10).coerceIn(10, 500)
-        TipoLoteria.NAVIDAD -> (historicoNavidad.size - 5).coerceIn(5, 100)
-        TipoLoteria.NINO -> (historicoNino.size - 5).coerceIn(5, 100)
+    // Calcular tamaño del histórico de forma segura - NUNCA puede ser negativo
+    val tamanoHistorico = maxOf(0, when (tipoLoteria) {
+        TipoLoteria.PRIMITIVA -> historicoPrimitiva.size
+        TipoLoteria.BONOLOTO -> historicoBonoloto.size
+        TipoLoteria.EUROMILLONES -> historicoEuromillones.size
+        TipoLoteria.GORDO_PRIMITIVA -> historicoGordo.size
+        TipoLoteria.LOTERIA_NACIONAL -> historicoNacional.size
+        TipoLoteria.NAVIDAD -> historicoNavidad.size
+        TipoLoteria.NINO -> historicoNino.size
+    })
+    
+    // ============ CÁLCULO 100% SEGURO PARA SLIDER ============
+    // REGLA: minDias SIEMPRE <= maxDias para evitar crash en Slider
+    // Si no hay datos suficientes, ambos serán iguales (slider deshabilitado)
+    val minDias: Int
+    val maxDias: Int
+    
+    if (tamanoHistorico < 5) {
+        // Datos insuficientes - usar valores fijos seguros
+        minDias = 2
+        maxDias = 2
+    } else {
+        // Datos suficientes - calcular rango normal
+        minDias = 2
+        maxDias = maxOf(minDias, minOf(tamanoHistorico - 2, 500))
     }
     
-    // Valor inicial: 20% del máximo, mínimo 10
-    val valorInicial = (maxDias * 0.2f).coerceIn(10f, maxDias.toFloat())
+    // Valor inicial: SIEMPRE dentro del rango [minDias, maxDias]
+    val valorInicial = maxOf(minDias.toFloat(), minOf((maxDias * 0.2f), maxDias.toFloat()))
+    // =========================================================
     
     // Cargar resultados anteriores
     var resultados by remember { 
@@ -171,13 +188,22 @@ fun PantallaBacktest(
                         
                         Text("Sorteos a probar: ${diasAtras.toInt()}")
                         
-                        Slider(
-                            value = diasAtras,
-                            onValueChange = { diasAtras = it },
-                            valueRange = 5f..maxDias.toFloat(),
-                            steps = (maxDias - 5) / 5,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        // Solo mostrar slider si hay rango válido
+                        if (maxDias > minDias) {
+                            Slider(
+                                value = diasAtras,
+                                onValueChange = { diasAtras = it },
+                                valueRange = minDias.toFloat()..maxDias.toFloat(),
+                                steps = ((maxDias - minDias) / 5).coerceAtLeast(0),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text(
+                                "⚠️ Datos insuficientes (solo $tamanoHistorico sorteos)",
+                                color = Color(0xFFFF6600),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         
                         Text(
                             "Más sorteos = resultado más fiable pero más lento",
@@ -256,18 +282,43 @@ fun PantallaBacktest(
                                             TipoLoteria.GORDO_PRIMITIVA -> historicoGordo.map { 
                                                 ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) 
                                             }
-                                            // Para Nacional/Navidad/Niño: convertir número de 5 dígitos a lista de dígitos
+                                            // Para Nacional/Navidad/Niño: usar TERMINACIONES como números
+                                            // Esto permite que la IA aprenda patrones de terminaciones (0-99)
                                             TipoLoteria.LOTERIA_NACIONAL -> historicoNacional.map { nac ->
-                                                val digitos = nac.primerPremio.padStart(5, '0').map { it.digitToInt() }
-                                                ResultadoPrimitiva(nac.fecha, digitos, 0, 0)
+                                                val num = nac.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                                val terminaciones = listOf(
+                                                    num.takeLast(2).toIntOrNull() ?: 0,        // Terminación 2 cifras (0-99)
+                                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,  // Última cifra (1-10)
+                                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11, // Decena (11-20)
+                                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21, // Centena mod (21-120)
+                                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,    // Mod 50 (1-50)
+                                                    nac.reintegros.firstOrNull()?.plus(41) ?: 41 // Reintegro (41-50)
+                                                ).map { it.coerceIn(1, 99) }
+                                                ResultadoPrimitiva(nac.fecha, terminaciones, 0, nac.reintegros.firstOrNull() ?: 0)
                                             }
                                             TipoLoteria.NAVIDAD -> historicoNavidad.map { nav ->
-                                                val digitos = nav.gordo.padStart(5, '0').map { it.digitToInt() }
-                                                ResultadoPrimitiva(nav.fecha, digitos, 0, 0)
+                                                val num = nav.gordo.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                                val terminaciones = listOf(
+                                                    num.takeLast(2).toIntOrNull() ?: 0,
+                                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
+                                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
+                                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
+                                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
+                                                    nav.reintegros.firstOrNull()?.plus(41) ?: 41
+                                                ).map { it.coerceIn(1, 99) }
+                                                ResultadoPrimitiva(nav.fecha, terminaciones, 0, nav.reintegros.firstOrNull() ?: 0)
                                             }
                                             TipoLoteria.NINO -> historicoNino.map { nino ->
-                                                val digitos = nino.primerPremio.padStart(5, '0').map { it.digitToInt() }
-                                                ResultadoPrimitiva(nino.fecha, digitos, 0, 0)
+                                                val num = nino.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                                val terminaciones = listOf(
+                                                    num.takeLast(2).toIntOrNull() ?: 0,
+                                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
+                                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
+                                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
+                                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
+                                                    nino.reintegros.firstOrNull()?.plus(41) ?: 41
+                                                ).map { it.coerceIn(1, 99) }
+                                                ResultadoPrimitiva(nino.fecha, terminaciones, 0, nino.reintegros.firstOrNull() ?: 0)
                                             }
                                         }
                                         addLog("📚 Histórico preparado: ${historicoComun.size} sorteos")
@@ -359,15 +410,18 @@ fun PantallaBacktest(
                             Spacer(modifier = Modifier.height(8.dp))
                             
                             var iteraciones by remember { mutableStateOf(50f) }
-                            var servicioActivo by remember { mutableStateOf(AprendizajeService.isRunning) }
+                            // Verificar si hay servicio activo para ESTA lotería
+                            var servicioActivoParaEsta by remember { mutableStateOf(AprendizajeService.isRunningFor(tipoLoteria.name)) }
+                            var servicioActivoOtra by remember { mutableStateOf(AprendizajeService.isRunning && !AprendizajeService.isRunningFor(tipoLoteria.name)) }
                             var ultimoProgresoLogueado by remember { mutableStateOf(-1) }
                             
-                            // Actualizar estado del servicio periódicamente (solo logear cada 5%)
+                            // Actualizar estado del servicio periódicamente
                             LaunchedEffect(Unit) {
                                 while(true) {
                                     delay(2000) // Cada 2 segundos
-                                    servicioActivo = AprendizajeService.isRunning
-                                    if (servicioActivo) {
+                                    servicioActivoParaEsta = AprendizajeService.isRunningFor(tipoLoteria.name)
+                                    servicioActivoOtra = AprendizajeService.isRunning && !servicioActivoParaEsta
+                                    if (servicioActivoParaEsta) {
                                         val progresoActual = AprendizajeService.progreso
                                         // Solo logear si el progreso cambió en al menos 5%
                                         if (progresoActual >= ultimoProgresoLogueado + 5 || progresoActual == 100) {
@@ -380,8 +434,37 @@ fun PantallaBacktest(
                                 }
                             }
                             
-                            if (servicioActivo) {
-                                // Mostrar progreso del servicio
+                            // Mostrar advertencia si hay servicio para OTRA lotería
+                            if (servicioActivoOtra) {
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = Color(0xFFFFE0B2)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("⚠️ ", fontSize = 20.sp)
+                                        Column {
+                                            Text(
+                                                "Aprendizaje activo para ${AprendizajeService.tipoLoteriaActual}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                "Espera a que termine o detenlo",
+                                                fontSize = 12.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            
+                            if (servicioActivoParaEsta) {
+                                // Mostrar progreso del servicio PARA ESTA lotería
                                 Card(
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -389,7 +472,7 @@ fun PantallaBacktest(
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
-                                            "🧠 Aprendiendo en segundo plano...",
+                                            "🧠 Aprendiendo ${tipoLoteria.displayName}...",
                                             fontWeight = FontWeight.Bold
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -403,9 +486,10 @@ fun PantallaBacktest(
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                         Text(
-                                            AprendizajeService.ultimoLog,
+                                            "Lotería: ${AprendizajeService.tipoLoteriaActual}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -422,7 +506,7 @@ fun PantallaBacktest(
                                         }
                                     }
                                 }
-                            } else {
+                            } else if (!servicioActivoOtra) {
                                 // Controles para iniciar
                                 Text("Iteraciones: ${iteraciones.toInt()}")
                                 Slider(
@@ -584,7 +668,7 @@ fun PantallaBacktest(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(150.dp) // Altura fija
+                                .height(280.dp) // Altura aumentada para ver más logs
                                 .background(Color(0xFF0D0D1A), RoundedCornerShape(4.dp))
                                 .padding(8.dp)
                         ) {

@@ -1489,7 +1489,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         diasAtras: Int = 10,
         tipoLoteria: String = "LOTERIA_NACIONAL"
     ): List<ResultadoBacktest> {
-        if (historico.size <= diasAtras) return emptyList()
+        // SEGURIDAD: Ajustar diasAtras si es mayor que el histórico disponible
+        val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
+        if (historico.size < 3) return emptyList()  // Mínimo 3 sorteos para hacer algo útil
         
         val resultados = mutableListOf<ResultadoBacktest>()
         
@@ -1503,7 +1505,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var mejorAcierto = 0
             var totalAciertos = 0
             
-            for (i in 0 until diasAtras) {
+            for (i in 0 until diasEfectivos) {
                 val historicoHastaMomento = historico.drop(i + 1)
                 if (historicoHastaMomento.isEmpty()) continue
                 
@@ -1516,6 +1518,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val terminaciones = historicoHastaMomento.mapNotNull { 
                     it.primerPremio.filter { c -> c.isDigit() }.toIntOrNull()?.rem(100)
                 }
+                if (terminaciones.isEmpty()) continue
+                
                 val frecuencias = terminaciones.groupingBy { it }.eachCount()
                 val mejoresTerminaciones = frecuencias.entries
                     .sortedByDescending { it.value }
@@ -1549,14 +1553,14 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 }
             }
             
-            val totalCombinaciones = diasAtras * 5
+            val totalCombinaciones = (diasEfectivos * 5).coerceAtLeast(1)
             // Para Nacional, el scoring premia más las terminaciones acertadas
             val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
                              aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
-                sorteosProbados = diasAtras,
+                sorteosProbados = diasEfectivos,
                 aciertos0 = aciertos0,
                 aciertos1 = aciertos1,
                 aciertos2 = aciertos2,
@@ -1581,7 +1585,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         historico: List<ResultadoNavidad>,
         diasAtras: Int = 10
     ): List<ResultadoBacktest> {
-        if (historico.size <= diasAtras) return emptyList()
+        // SEGURIDAD: Ajustar diasAtras si es mayor que el histórico disponible
+        val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
+        if (historico.size < 3) return emptyList()  // Mínimo 3 sorteos para hacer algo útil
         
         val resultados = mutableListOf<ResultadoBacktest>()
         
@@ -1595,17 +1601,21 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             var mejorAcierto = 0
             var totalAciertos = 0
             
-            for (i in 0 until diasAtras) {
+            for (i in 0 until diasEfectivos) {
                 val historicoHastaMomento = historico.drop(i + 1)
                 if (historicoHastaMomento.isEmpty()) continue
                 
                 val sorteoReal = historico[i]
-                val gordoReal = sorteoReal.gordo.toIntOrNull() ?: 0
+                val gordoReal = sorteoReal.gordo.filter { it.isDigit() }.toIntOrNull() ?: 0
                 val terminacionReal = gordoReal % 100  // 2 últimas cifras
                 val reintegrosReales = sorteoReal.reintegros.toSet()
                 
                 // Generar predicciones con el histórico de ese momento
-                val terminaciones = historicoHastaMomento.mapNotNull { it.gordo.takeLast(2).toIntOrNull() }
+                val terminaciones = historicoHastaMomento.mapNotNull { 
+                    it.gordo.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
+                }
+                if (terminaciones.isEmpty()) continue
+                
                 val frecuencias = terminaciones.groupingBy { it }.eachCount()
                 val mejoresTerminaciones = frecuencias.entries
                     .sortedByDescending { it.value }
@@ -1638,13 +1648,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 }
             }
             
-            val totalCombinaciones = diasAtras * 5
+            val totalCombinaciones = (diasEfectivos * 5).coerceAtLeast(1)
             val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
                              aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
-                sorteosProbados = diasAtras,
+                sorteosProbados = diasEfectivos,
                 aciertos0 = aciertos0,
                 aciertos1 = aciertos1,
                 aciertos2 = aciertos2,

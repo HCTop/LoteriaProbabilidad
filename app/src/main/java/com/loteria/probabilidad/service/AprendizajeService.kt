@@ -39,7 +39,13 @@ class AprendizajeService : Service() {
         var totalIteraciones = 0
         var ultimoLog = ""
         var entrenamientosCompletados = 0
-        var tipoLoteriaActual = ""  // Para saber qué lotería abrir
+        var tipoLoteriaActual = ""  // Lotería que se está procesando AHORA
+        var tipoLoteriaIniciada = "" // Lotería que inició el proceso (para verificación)
+        
+        // Verificar si hay un servicio corriendo para una lotería específica
+        fun isRunningFor(tipoLoteria: String): Boolean {
+            return isRunning && tipoLoteriaActual == tipoLoteria
+        }
         
         fun startLearning(
             context: Context,
@@ -47,7 +53,9 @@ class AprendizajeService : Service() {
             sorteos: Int,
             iteraciones: Int
         ) {
+            // IMPORTANTE: Guardar la lotería que inició el proceso
             tipoLoteriaActual = tipoLoteria
+            tipoLoteriaIniciada = tipoLoteria
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
@@ -108,8 +116,20 @@ class AprendizajeService : Service() {
                 val calculador = CalculadorProbabilidad(this@AprendizajeService)
                 val memoriaIA = MemoriaIA(this@AprendizajeService)
                 
-                // Cargar histórico según tipo de lotería
+                // Cargar histórico UNA SOLA VEZ (optimización)
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
+                
+                // Pre-cargar datos según tipo
+                val historicoPrecargado: Any = when (tipoLoteria) {
+                    "PRIMITIVA" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA)
+                    "BONOLOTO" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO)
+                    "EUROMILLONES" -> dataSource.leerHistoricoEuromillones()
+                    "GORDO_PRIMITIVA" -> dataSource.leerHistoricoGordoPrimitiva()
+                    "LOTERIA_NACIONAL" -> dataSource.leerHistoricoNacional(TipoLoteria.LOTERIA_NACIONAL)
+                    "NAVIDAD" -> dataSource.leerHistoricoNavidad()
+                    "NINO" -> dataSource.leerHistoricoNacional(TipoLoteria.NINO)
+                    else -> emptyList<Any>()
+                }
                 
                 for (i in 1..iteraciones) {
                     if (!isRunning) break
@@ -118,63 +138,97 @@ class AprendizajeService : Service() {
                     progreso = ((i.toFloat() / iteraciones) * 100).toInt()
                     ultimoLog = "Iteración $i de $iteraciones para $tipoLoteria"
                     
-                    updateNotification("Aprendiendo $tipoLoteria: $i/$iteraciones", progreso)
+                    // Actualizar notificación cada 5 iteraciones para no sobrecargar
+                    if (i % 5 == 1 || i == iteraciones) {
+                        updateNotification("Aprendiendo $tipoLoteria: $i/$iteraciones", progreso)
+                    }
                     
-                    // Ejecutar backtesting según tipo
+                    // Ejecutar backtesting según tipo (usando datos precargados)
                     val resultados = when (tipoLoteria) {
                         "PRIMITIVA" -> {
-                            val historico = dataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA)
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoPrimitiva>
                             val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
                             calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
                             results
                         }
                         "BONOLOTO" -> {
-                            val historico = dataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO)
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoPrimitiva>
                             val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
                             calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
                             results
                         }
                         "EUROMILLONES" -> {
-                            val historico = dataSource.leerHistoricoEuromillones()
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoEuromillones>
                             val results = calculador.ejecutarBacktestEuromillones(historico, sorteos)
                             val historicoComun = historico.map { euro -> ResultadoPrimitiva(euro.fecha, euro.numeros, 0, 0) }
                             calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
                             results
                         }
                         "GORDO_PRIMITIVA" -> {
-                            val historico = dataSource.leerHistoricoGordoPrimitiva()
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoGordoPrimitiva>
                             val results = calculador.ejecutarBacktestGordo(historico, sorteos)
                             val historicoComun = historico.map { gordo -> ResultadoPrimitiva(gordo.fecha, gordo.numeros, 0, 0) }
                             calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
                             results
                         }
                         "LOTERIA_NACIONAL" -> {
-                            val historico = dataSource.leerHistoricoNacional(TipoLoteria.LOTERIA_NACIONAL)
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoNacional>
                             val results = calculador.ejecutarBacktestNacional(historico, sorteos)
-                            // Convertir a dígitos para aprendizaje
+                            // Convertir a formato para aprendizaje usando TERMINACIONES
                             val historicoComun = historico.map { nac -> 
-                                val digitos = nac.primerPremio.padStart(5, '0').map { it.digitToInt() }
-                                ResultadoPrimitiva(nac.fecha, digitos, 0, 0)
+                                val num = nac.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                val terminaciones = listOf(
+                                    num.takeLast(2).toIntOrNull() ?: 0,        // Terminación 2 cifras (0-99)
+                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,  // Última cifra (1-10)
+                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11, // Decena (11-20)
+                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21, // Centena mod (21-120)
+                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,    // Mod 50 (1-50)
+                                    nac.reintegros.firstOrNull()?.plus(41) ?: 41 // Reintegro (41-50)
+                                ).map { it.coerceIn(1, 99) }
+                                ResultadoPrimitiva(nac.fecha, terminaciones, 0, nac.reintegros.firstOrNull() ?: 0)
                             }
                             calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
                             results
                         }
                         "NAVIDAD" -> {
-                            val historico = dataSource.leerHistoricoNavidad()
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoNavidad>
                             val results = calculador.ejecutarBacktestNavidad(historico, sorteos)
                             val historicoComun = historico.map { nav -> 
-                                val digitos = nav.gordo.padStart(5, '0').map { it.digitToInt() }
-                                ResultadoPrimitiva(nav.fecha, digitos, 0, 0)
+                                val num = nav.gordo.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                val terminaciones = listOf(
+                                    num.takeLast(2).toIntOrNull() ?: 0,
+                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
+                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
+                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
+                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
+                                    nav.reintegros.firstOrNull()?.plus(41) ?: 41
+                                ).map { it.coerceIn(1, 99) }
+                                ResultadoPrimitiva(nav.fecha, terminaciones, 0, nav.reintegros.firstOrNull() ?: 0)
                             }
                             calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
                             results
                         }
                         "NINO" -> {
-                            val historico = dataSource.leerHistoricoNacional(TipoLoteria.NINO)
-                            val results = calculador.ejecutarBacktestNacional(historico, sorteos)
+                            @Suppress("UNCHECKED_CAST")
+                            val historico = historicoPrecargado as List<ResultadoNacional>
+                            val results = calculador.ejecutarBacktestNacional(historico, sorteos, "NINO")
                             val historicoComun = historico.map { nino -> 
-                                val digitos = nino.primerPremio.padStart(5, '0').map { it.digitToInt() }
-                                ResultadoPrimitiva(nino.fecha, digitos, 0, 0)
+                                val num = nino.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+                                val terminaciones = listOf(
+                                    num.takeLast(2).toIntOrNull() ?: 0,
+                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
+                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
+                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
+                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
+                                    nino.reintegros.firstOrNull()?.plus(41) ?: 41
+                                ).map { it.coerceIn(1, 99) }
+                                ResultadoPrimitiva(nino.fecha, terminaciones, 0, nino.reintegros.firstOrNull() ?: 0)
                             }
                             calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
                             results
@@ -188,8 +242,8 @@ class AprendizajeService : Service() {
                         ultimoLog = "✅ It.$i - ${resumen.nombreNivel}"
                     }
                     
-                    // Pequeña pausa entre iteraciones
-                    delay(300)
+                    // Pausa mínima para no bloquear (50ms en lugar de 300ms = 6x más rápido)
+                    delay(50)
                 }
                 
                 ultimoLog = "🎉 ¡Completado! $entrenamientosCompletados iteraciones"
