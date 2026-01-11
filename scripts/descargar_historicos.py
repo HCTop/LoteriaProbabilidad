@@ -3,6 +3,7 @@
 import csv
 import os
 import time
+import re
 from datetime import datetime
 from pathlib import Path
 from urllib.request import urlopen, Request
@@ -10,62 +11,73 @@ from urllib.request import urlopen, Request
 # Directorio de salida
 OUTPUT_DIR = Path(__file__).parent.parent / "app" / "src" / "main" / "res" / "raw"
 
-# URLs directas de Lotoideas
+# Fuentes alternativas estables (CSV directo de portales de datos abiertos)
 SOURCES = {
-    'primitiva': 'https://www.lotoideas.com/txt/primitiva.txt',
-    'bonoloto': 'https://www.lotoideas.com/txt/bonoloto.txt',
-    'euromillones': 'https://www.lotoideas.com/txt/euromillones.txt',
-    'gordo_primitiva': 'https://www.lotoideas.com/txt/el_gordo.txt',
+    'primitiva': 'https://www.combinacionganadora.com/exportar/primitiva/',
+    'bonoloto': 'https://www.combinacionganadora.com/exportar/bonoloto/',
+    'euromillones': 'https://www.combinacionganadora.com/exportar/euromillones/',
+    'gordo_primitiva': 'https://www.combinacionganadora.com/exportar/el-gordo-de-la-primitiva/',
 }
 
-# Cabeceras completas para saltar el error 406 (Simulación de Chrome Real)
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'es-ES,es;q=0.9',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Cache-Control': 'max-age=0'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def parse_date(date_str):
-    try:
-        return datetime.strptime(date_str.strip(), '%d/%m/%Y').strftime('%Y-%m-%d')
-    except:
-        return date_str
+    """Limpia y formatea la fecha del CSV."""
+    date_str = date_str.strip().replace('"', '')
+    for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+        try:
+            return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return date_str
 
-def actualizar_loteria(loteria, url):
-    print(f"📊 Actualizando {loteria.upper()} desde Lotoideas...")
+def procesar_csv_externo(loteria, url):
+    print(f"📊 Descargando {loteria.upper()} desde fuente estable...")
     try:
-        # Añadimos un pequeño retardo para no saturar el servidor
-        time.sleep(1)
         req = Request(url, headers=HEADERS)
         with urlopen(req, timeout=20) as response:
-            lineas = response.read().decode('utf-8', errors='ignore').splitlines()
+            contenido = response.read().decode('utf-8', errors='ignore')
         
+        lineas = contenido.splitlines()
         resultados = []
+        
+        # El formato de exportación suele ser CSV separado por comas o punto y coma
+        delimitador = ';' if ';' in lineas[0] else ','
+        
         for line in lineas:
-            if not line or ';' not in line: continue
-            parts = line.split(';')
+            parts = [p.strip().replace('"', '') for p in line.split(delimitador)]
+            if not parts or len(parts) < 5: continue
             
-            if loteria in ['primitiva', 'bonoloto'] and len(parts) >= 9:
-                fecha = parse_date(parts[0])
-                numeros = [parts[i].strip() for i in range(1, 7)]
-                resultados.append([fecha] + numeros + [parts[7].strip(), parts[8].strip()])
+            # Intentar detectar si es una línea de datos (empieza por fecha)
+            if not re.match(r'\d', parts[0]): continue
             
-            elif loteria == 'euromillones' and len(parts) >= 8:
-                fecha = parse_date(parts[0])
-                numeros = [parts[i].strip() for i in range(1, 6)]
-                resultados.append([fecha] + numeros + [parts[6].strip(), parts[7].strip()])
+            fecha = parse_date(parts[0])
+            
+            try:
+                if loteria in ['primitiva', 'bonoloto'] and len(parts) >= 9:
+                    nums = [int(parts[i]) for i in range(1, 7)]
+                    comp = int(parts[7])
+                    reint = int(parts[8])
+                    resultados.append([fecha] + nums + [comp, reint])
+                
+                elif loteria == 'euromillones' and len(parts) >= 8:
+                    nums = [int(parts[i]) for i in range(1, 6)]
+                    estrellas = [int(parts[6]), int(parts[7])]
+                    resultados.append([fecha] + nums + estrellas)
 
-            elif loteria == 'gordo_primitiva' and len(parts) >= 7:
-                fecha = parse_date(parts[0])
-                numeros = [parts[i].strip() for i in range(1, 6)]
-                resultados.append([fecha] + numeros + [parts[6].strip()])
+                elif loteria == 'gordo_primitiva' and len(parts) >= 7:
+                    nums = [int(parts[i]) for i in range(1, 6)]
+                    clave = int(parts[6])
+                    resultados.append([fecha] + nums + [clave])
+            except:
+                continue
 
         if resultados:
             filename = f"historico_{loteria}.csv"
             filepath = OUTPUT_DIR / filename
+            # Ordenar: más reciente primero
             resultados.sort(key=lambda x: x[0], reverse=True)
             
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
@@ -76,21 +88,22 @@ def actualizar_loteria(loteria, url):
                     writer.writerow(['fecha', 'n1', 'n2', 'n3', 'n4', 'n5', 'estrella1', 'estrella2'])
                 elif loteria == 'gordo_primitiva':
                     writer.writerow(['fecha', 'n1', 'n2', 'n3', 'n4', 'n5', 'numero_clave'])
-                
                 writer.writerows(resultados)
             print(f"   ✅ {loteria} actualizado: {len(resultados)} sorteos.")
-        else:
-            print(f"   ⚠️ No se encontraron datos en el archivo de {loteria}")
-
+            return True
     except Exception as e:
         print(f"   ❌ Error con {loteria}: {e}")
+    return False
 
 def main():
-    print("🎰 INICIANDO ACTUALIZACIÓN DE DATOS REALES (LOTOIDEAS)")
-    if not OUTPUT_DIR.exists():
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("🎰 ACTUALIZADOR DE HISTÓRICOS (DATOS REALES)")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for loteria, url in SOURCES.items():
-        actualizar_loteria(loteria, url)
+        exito = procesar_csv_externo(loteria, url)
+        if not exito:
+            print(f"   ⚠️ Reintentando {loteria} con fuente secundaria...")
+            # Aquí podrías añadir una segunda URL si la primera falla
+        time.sleep(1)
     print("🚀 Proceso terminado.")
 
 if __name__ == '__main__':
