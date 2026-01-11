@@ -37,6 +37,7 @@ fun PantallaSeleccionLoteria(
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
     
+    // URL base de GitHub donde el bot sube los CSV reales
     val githubBaseUrl = "https://raw.githubusercontent.com/HCTop/LoteriaProbabilidad/master/app/src/main/res/raw/"
 
     Scaffold(
@@ -65,42 +66,45 @@ fun PantallaSeleccionLoteria(
         ) {
             DisclaimerCard()
             
-            Text("Loterías de números", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text("Loterías disponibles", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.PRIMITIVA,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.PRIMITIVA) }
-            )
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.BONOLOTO,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.BONOLOTO) }
-            )
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.EUROMILLONES,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.EUROMILLONES) }
-            )
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.GORDO_PRIMITIVA,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.GORDO_PRIMITIVA) }
-            )
+            // Grid de Loterías
+            TipoLoteria.values().forEach { loteria ->
+                LoteriaButton(
+                    tipoLoteria = loteria,
+                    onClick = { onLoteriaSeleccionada(loteria) }
+                )
+            }
             
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Panel de Sincronización Real
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                border = ButtonDefaults.outlinedButtonBorder
             ) {
                 Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("✅ Sincronización Real Activa", fontWeight = FontWeight.Bold)
-                    Text("Pulsa para obtener los sorteos oficiales de Lotoideas (incluyendo el día 8).", 
-                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("✅ Sincronización Real Activa", fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        "Descarga los últimos sorteos reales de Lotoideas y Google Sheets.", 
+                        style = MaterialTheme.typography.bodySmall, 
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                     
                     mensajeDescarga?.let { mensaje ->
                         Text(
                             mensaje, 
                             color = if(mensaje.contains("✅")) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.labelSmall, 
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center
                         )
                     }
 
@@ -108,32 +112,54 @@ fun PantallaSeleccionLoteria(
                         onClick = {
                             scope.launch {
                                 descargando = true
-                                mensajeDescarga = "Conectando con GitHub..."
+                                mensajeDescarga = "Sincronizando con el servidor..."
                                 withContext(Dispatchers.IO) {
                                     try {
-                                        val files = listOf("historico_primitiva.csv", "historico_bonoloto.csv", "historico_euromillones.csv", "historico_gordo_primitiva.csv")
+                                        // Todos los archivos generados por el script de Python
+                                        val files = listOf(
+                                            "historico_primitiva.csv", 
+                                            "historico_bonoloto.csv", 
+                                            "historico_euromillones.csv", 
+                                            "historico_gordo_primitiva.csv",
+                                            "historico_loteria_nacional.csv",
+                                            "historico_navidad.csv",
+                                            "historico_nino.csv"
+                                        )
+                                        
+                                        var exitos = 0
                                         files.forEach { name ->
-                                            val content = URL(githubBaseUrl + name).readText()
-                                            if (content.isNotBlank()) {
-                                                File(context.cacheDir, name).writeText(content)
+                                            try {
+                                                val content = URL(githubBaseUrl + name).readText()
+                                                if (content.length > 50) { // Validar que no sea un 404 o archivo vacío
+                                                    File(context.cacheDir, name).writeText(content)
+                                                    exitos++
+                                                }
+                                            } catch (e: Exception) {
+                                                println("Error descargando $name: ${e.message}")
                                             }
                                         }
-                                        withContext(Dispatchers.Main) { mensajeDescarga = "✅ Datos reales actualizados con éxito." }
-                                    } catch (_: Exception) {
-                                        withContext(Dispatchers.Main) { mensajeDescarga = "❌ Error: Verifica tu internet." }
+                                        
+                                        withContext(Dispatchers.Main) { 
+                                            if (exitos > 0) mensajeDescarga = "✅ $exitos loterías actualizadas correctamente."
+                                            else mensajeDescarga = "❌ Error: No se pudo obtener datos. Prueba más tarde."
+                                        }
+                                    } catch (e: Exception) {
+                                        withContext(Dispatchers.Main) { mensajeDescarga = "❌ Error de conexión. Revisa tu internet." }
                                     }
                                 }
                                 descargando = false
                             }
                         },
                         enabled = !descargando,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium
                     ) {
-                        if (descargando) CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        else {
+                        if (descargando) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
                             Icon(Icons.Default.CloudDownload, null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Descargar sorteos reales")
+                            Text("Actualizar datos reales ahora")
                         }
                     }
                 }
