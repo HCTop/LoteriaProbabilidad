@@ -1,20 +1,39 @@
 # 🎰 Lotería Probabilidad
 
-**Versión: 2.3.0** | **Última actualización: 2026-01-11 10:20 UTC**
+**Versión: 2.4.0** | **Última actualización: 2026-01-11 10:40 UTC**
 
 Aplicación Android para analizar históricos de loterías españolas y generar combinaciones basadas en diferentes métodos de cálculo de probabilidad, incluyendo IA con algoritmos genéticos.
 
-## 📊 Datos REALES incluidos
+## 📊 Datos incluidos
 
 | Lotería | Sorteos | Fuente |
 |---------|---------|--------|
-| Primitiva | 317 | laprimitiva.info (2023-2025) |
-| Bonoloto | 313 | Datos reales |
-| Euromillones | 20 | Datos reales |
-| Gordo | 10 | Datos reales |
-| Nacional | 10 | Datos reales |
-| **Navidad** | **40** | **VERIFICADO OFICIAL** |
-| **Niño** | **36** | **VERIFICADO OFICIAL** |
+| Primitiva | 317+ | Google Sheets lotoideas.com (1985-2026) |
+| Bonoloto | 313+ | Google Sheets lotoideas.com (1988-2026) |
+| Euromillones | 20+ | Google Sheets lotoideas.com (2004-2026) |
+| Gordo | 10+ | Google Sheets lotoideas.com (2005-2026) |
+| Nacional | 22 | Datos verificados |
+| **Navidad** | **75** | **100% VERIFICADO OFICIAL (1950-2024)** |
+| **Niño** | **85** | **100% VERIFICADO OFICIAL (1941-2025)** |
+
+## 🔄 Actualizar datos REALES
+
+Ejecuta el script para descargar los datos más recientes:
+
+```bash
+cd scripts/
+python3 actualizar_datos.py
+```
+
+### URLs de datos (Google Sheets públicos):
+- **Primitiva**: 
+  - 2013-2026: `gid=1`
+  - 1985-2012: `gid=0`
+- **Bonoloto**:
+  - 2013-2026: `gid=1`
+  - 1988-2012: `gid=0`
+- **Euromillones**: archivo único
+- **Gordo de la Primitiva**: archivo único
 
 ## ✨ Características
 
