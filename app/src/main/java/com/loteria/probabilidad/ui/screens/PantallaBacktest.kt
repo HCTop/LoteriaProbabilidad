@@ -80,7 +80,7 @@ fun PantallaBacktest(
         maxDias = 2
     } else {
         // Datos suficientes - calcular rango normal
-        minDias = 2
+        minDias =10
         maxDias = maxOf(minDias, minOf(tamanoHistorico - 2, 500))
     }
     
