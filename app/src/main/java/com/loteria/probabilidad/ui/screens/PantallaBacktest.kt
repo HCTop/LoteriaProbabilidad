@@ -142,7 +142,7 @@ fun PantallaBacktest(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Explicación
+           /* // Explicación
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -172,7 +172,7 @@ fun PantallaBacktest(
                         )
                     }
                 }
-            }
+            }*/
             
             // Configuración
             item {
@@ -547,7 +547,225 @@ fun PantallaBacktest(
                     }
                 }
             }
-            
+
+
+
+          //-----------------------------------------------------------------------------------------------
+            // ==================== PANEL DE DEBUG (SIEMPRE VISIBLE) ====================
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF1A1A2E)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.BugReport,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00FF00),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "🔍 DEBUG LOG",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00FF00)
+                                )
+                                Text(
+                                    " (${logs.size})",
+                                    fontSize = 10.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    logs = listOf()
+                                    persistencia.limpiarLogs(tipoLoteria.name)
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Limpiar",
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        // Mostrar fecha del último entrenamiento si existe
+                        if (fechaUltimoEntrenamiento.isNotEmpty()) {
+                            Text(
+                                "📅 Último entrenamiento: $fechaUltimoEntrenamiento",
+                                fontSize = 10.sp,
+                                color = Color(0xFF888888),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Mostrar logs con SCROLL y altura fija
+                        val scrollState = rememberScrollState()
+
+                        // Auto-scroll al final cuando hay nuevos logs
+                        LaunchedEffect(logs.size) {
+                            scrollState.animateScrollTo(scrollState.maxValue)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp) // Altura aumentada para ver más logs
+                                .background(Color(0xFF0D0D1A), RoundedCornerShape(4.dp))
+                                .padding(8.dp)
+                        ) {
+                            if (logs.isEmpty()) {
+                                // Mensaje cuando no hay logs
+                                Text(
+                                    "Sin actividad registrada.\nEjecuta un backtesting para ver el log.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF666666),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.align(Alignment.Center)
+                                )
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(scrollState)
+                                ) {
+                                    logs.forEach { log ->
+                                        val color = when {
+                                            log.contains("✅") -> Color(0xFF00FF00)
+                                            log.contains("❌") || log.contains("ERROR") -> Color(0xFFFF4444)
+                                            log.contains("⚠️") -> Color(0xFFFFAA00)
+                                            log.contains("🚀") || log.contains("🧠") -> Color(0xFF00AAFF)
+                                            log.contains("📊") || log.contains("📝") -> Color(0xFFAAAAFF)
+                                            log.contains("🤖") || log.contains("🏆") || log.contains("🔄") -> Color(0xFFFFD700)
+                                            else -> Color(0xFFCCCCCC)
+                                        }
+                                        Text(
+                                            text = log,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = color,
+                                            modifier = Modifier.padding(vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Resumen del estado actual de la memoria
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Divider(color = Color(0xFF333333))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            "📦 MEMORIA DE ${tipoLoteria.name}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00AAFF)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Obtener estado específico de esta lotería
+                        val estadoActual = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                        Text(
+                            "Nivel: ${estadoActual.nombreNivel}",
+                            color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            "Entrenamientos: ${estadoActual.totalEntrenamientos}",
+                            color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            "Mejor puntuación: ${estadoActual.mejorPuntuacion}",
+                            color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            "Última actualización: ${estadoActual.ultimaActualizacion}",
+                            color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Pesos aprendidos para ${tipoLoteria.displayName}:",
+                            color = Color(0xFF00AAFF),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        estadoActual.pesosCaracteristicas.entries
+                            .sortedByDescending { it.value }
+                            .forEach { (car, peso) ->
+                                val barLength = (peso * 20).toInt()
+                                val bar = "█".repeat(barLength) + "░".repeat(20 - barLength)
+                                Text(
+                                    "${car.padEnd(12)}: $bar ${(peso*100).toInt()}%",
+                                    color = Color(0xFFAAFFAA),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                )
+                            }
+
+                        // Botón para resetear memoria
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row {
+                            OutlinedButton(
+                                onClick = {
+                                    memoriaIA.reiniciarMemoria(tipoLoteria.name)
+                                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                                    addLog("🗑️ Memoria de ${tipoLoteria.name} reiniciada")
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFFFF6666)
+                                ),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("🗑️ Resetear ${tipoLoteria.displayName}", fontSize = 10.sp)
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                                    addLog("🔄 Estado actualizado")
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF66FF66)
+                                ),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("🔄 Refrescar", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+
+
+
             // Resultados
             if (ejecutado && resultados.isNotEmpty()) {
                 item {
@@ -594,217 +812,7 @@ fun PantallaBacktest(
                 }
             }
             
-            // ==================== PANEL DE DEBUG (SIEMPRE VISIBLE) ====================
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF1A1A2E)
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.BugReport,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00FF00),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "🔍 DEBUG LOG",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00FF00)
-                                )
-                                Text(
-                                    " (${logs.size})",
-                                    fontSize = 10.sp,
-                                    color = Color.Gray
-                                )
-                            }
-                            IconButton(
-                                onClick = { 
-                                    logs = listOf()
-                                    persistencia.limpiarLogs(tipoLoteria.name)
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Limpiar",
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        
-                        // Mostrar fecha del último entrenamiento si existe
-                        if (fechaUltimoEntrenamiento.isNotEmpty()) {
-                            Text(
-                                "📅 Último entrenamiento: $fechaUltimoEntrenamiento",
-                                fontSize = 10.sp,
-                                color = Color(0xFF888888),
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        // Mostrar logs con SCROLL y altura fija
-                        val scrollState = rememberScrollState()
-                        
-                        // Auto-scroll al final cuando hay nuevos logs
-                        LaunchedEffect(logs.size) {
-                            scrollState.animateScrollTo(scrollState.maxValue)
-                        }
-                        
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(280.dp) // Altura aumentada para ver más logs
-                                .background(Color(0xFF0D0D1A), RoundedCornerShape(4.dp))
-                                .padding(8.dp)
-                        ) {
-                            if (logs.isEmpty()) {
-                                // Mensaje cuando no hay logs
-                                Text(
-                                    "Sin actividad registrada.\nEjecuta un backtesting para ver el log.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF666666),
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.align(Alignment.Center)
-                                )
-                            } else {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(scrollState)
-                                ) {
-                                    logs.forEach { log ->
-                                        val color = when {
-                                            log.contains("✅") -> Color(0xFF00FF00)
-                                            log.contains("❌") || log.contains("ERROR") -> Color(0xFFFF4444)
-                                            log.contains("⚠️") -> Color(0xFFFFAA00)
-                                            log.contains("🚀") || log.contains("🧠") -> Color(0xFF00AAFF)
-                                            log.contains("📊") || log.contains("📝") -> Color(0xFFAAAAFF)
-                                            log.contains("🤖") || log.contains("🏆") || log.contains("🔄") -> Color(0xFFFFD700)
-                                            else -> Color(0xFFCCCCCC)
-                                        }
-                                        Text(
-                                            text = log,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp,
-                                            color = color,
-                                            modifier = Modifier.padding(vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Resumen del estado actual de la memoria
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Divider(color = Color(0xFF333333))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Text(
-                            "📦 MEMORIA DE ${tipoLoteria.name}",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00AAFF)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        
-                        // Obtener estado específico de esta lotería
-                        val estadoActual = memoriaIA.obtenerResumenIA(tipoLoteria.name)
-                        Text(
-                            "Nivel: ${estadoActual.nombreNivel}",
-                            color = Color(0xFFCCCCCC),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            "Entrenamientos: ${estadoActual.totalEntrenamientos}",
-                            color = Color(0xFFCCCCCC),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            "Mejor puntuación: ${estadoActual.mejorPuntuacion}",
-                            color = Color(0xFFCCCCCC),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            "Última actualización: ${estadoActual.ultimaActualizacion}",
-                            color = Color(0xFFCCCCCC),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Pesos aprendidos para ${tipoLoteria.displayName}:",
-                            color = Color(0xFF00AAFF),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
-                        estadoActual.pesosCaracteristicas.entries
-                            .sortedByDescending { it.value }
-                            .forEach { (car, peso) ->
-                                val barLength = (peso * 20).toInt()
-                                val bar = "█".repeat(barLength) + "░".repeat(20 - barLength)
-                                Text(
-                                    "${car.padEnd(12)}: $bar ${(peso*100).toInt()}%",
-                                    color = Color(0xFFAAFFAA),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        
-                        // Botón para resetear memoria
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row {
-                            OutlinedButton(
-                                onClick = {
-                                    memoriaIA.reiniciarMemoria(tipoLoteria.name)
-                                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
-                                    addLog("🗑️ Memoria de ${tipoLoteria.name} reiniciada")
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFFFF6666)
-                                ),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text("🗑️ Resetear ${tipoLoteria.displayName}", fontSize = 10.sp)
-                            }
-                            
-                            Spacer(modifier = Modifier.width(8.dp))
-                            
-                            OutlinedButton(
-                                onClick = {
-                                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
-                                    addLog("🔄 Estado actualizado")
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFF66FF66)
-                                ),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text("🔄 Refrescar", fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-            }
+
         }
     }
 }
