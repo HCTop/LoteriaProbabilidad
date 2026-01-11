@@ -1,178 +1,260 @@
 package com.loteria.probabilidad.data.datasource
 
-import android.annotation.SuppressLint
 import android.content.Context
 import com.loteria.probabilidad.data.model.*
 import java.io.BufferedReader
-import java.io.File
 import java.io.InputStreamReader
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
- * DataSource con capacidad de ACTUALIZACIÓN AUTOMÁTICA desde GitHub.
+ * DataSource para leer los datos históricos de loterías desde archivos CSV.
  */
 class LoteriaLocalDataSource(private val context: Context) {
 
-    private val GITHUB_USER = "HCTop"
-    private val REPO_NAME = "LoteriaProbabilidad"
-    private val BASE_URL = "https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/master/app/src/main/res/raw/"
-
     /**
-     * Obtiene las líneas de un CSV, priorizando la descarga de GitHub.
+     * Lee el histórico de La Primitiva o Bonoloto desde CSV.
      */
-    private suspend fun obtenerLineasActualizadas(nombreArchivo: String): List<String> = withContext(Dispatchers.IO) {
-        val archivoCache = File(context.cacheDir, nombreArchivo)
+    fun leerHistoricoPrimitiva(tipoLoteria: TipoLoteria): List<ResultadoPrimitiva> {
+        val resultados = mutableListOf<ResultadoPrimitiva>()
         
         try {
-            // 1. Intentar descargar de GitHub
-            val contenido = URL(BASE_URL + nombreArchivo).readText()
-            // 2. Guardar en caché interna para uso offline futuro
-            archivoCache.writeText(contenido)
-            contenido.lines()
-        } catch (e: Exception) {
-            // 3. Si falla (sin internet), usar caché o archivo local de fábrica
-            if (archivoCache.exists()) {
-                archivoCache.readLines()
-            } else {
-                leerDesdeRecursosRaw(nombreArchivo)
-            }
-        }
-    }
-
-    private fun leerDesdeRecursosRaw(nombreArchivo: String): List<String> {
-        val resourceId = getResourceId(nombreArchivo)
-        if (resourceId == 0) return emptyList()
-        return try {
+            val resourceId = getResourceId(tipoLoteria.archivoCSV)
+            if (resourceId == 0) return resultados
+            
             context.resources.openRawResource(resourceId).use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).readLines()
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    /**
-     * Lee el histórico de La Primitiva o Bonoloto.
-     */
-    suspend fun leerHistoricoPrimitiva(tipoLoteria: TipoLoteria): List<ResultadoPrimitiva> {
-        val resultados = mutableListOf<ResultadoPrimitiva>()
-        val lineas = obtenerLineasActualizadas(tipoLoteria.archivoCSV)
-        
-        if (lineas.isNotEmpty()) {
-            lineas.drop(1).filter { it.isNotBlank() }.forEach { line ->
-                val campos = line.split(",").map { it.trim() }
-                if (campos.size >= 9) {
-                    try {
-                        resultados.add(ResultadoPrimitiva(
-                            fecha = campos[0],
-                            numeros = listOf(
-                                campos[1].toInt(), campos[2].toInt(), campos[3].toInt(),
-                                campos[4].toInt(), campos[5].toInt(), campos[6].toInt()
-                            ),
-                            complementario = campos[7].toInt(),
-                            reintegro = campos[8].toInt()
-                        ))
-                    } catch (_: Exception) {}
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    // Saltar cabecera
+                    reader.readLine()
+                    
+                    var linea: String?
+                    while (reader.readLine().also { linea = it } != null) {
+                        linea?.let { line ->
+                            val campos = line.split(",")
+                            if (campos.size >= 9) {
+                                try {
+                                    val resultado = ResultadoPrimitiva(
+                                        fecha = campos[0].trim(),
+                                        numeros = listOf(
+                                            campos[1].trim().toInt(),
+                                            campos[2].trim().toInt(),
+                                            campos[3].trim().toInt(),
+                                            campos[4].trim().toInt(),
+                                            campos[5].trim().toInt(),
+                                            campos[6].trim().toInt()
+                                        ),
+                                        complementario = campos[7].trim().toInt(),
+                                        reintegro = campos[8].trim().toInt()
+                                    )
+                                    resultados.add(resultado)
+                                } catch (e: NumberFormatException) {
+                                    // Ignorar líneas con formato incorrecto
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return resultados.reversed()
+        
+        return resultados
     }
 
     /**
-     * Lee el histórico de Euromillones.
+     * Lee el histórico de Euromillones desde CSV.
      */
-    suspend fun leerHistoricoEuromillones(): List<ResultadoEuromillones> {
+    fun leerHistoricoEuromillones(): List<ResultadoEuromillones> {
         val resultados = mutableListOf<ResultadoEuromillones>()
-        val lineas = obtenerLineasActualizadas(TipoLoteria.EUROMILLONES.archivoCSV)
         
-        lineas.drop(1).filter { it.isNotBlank() }.forEach { line ->
-            val campos = line.split(",").map { it.trim() }
-            if (campos.size >= 8) {
-                try {
-                    resultados.add(ResultadoEuromillones(
-                        fecha = campos[0],
-                        numeros = (1..5).map { campos[it].toInt() },
-                        estrellas = listOf(campos[6].toInt(), campos[7].toInt())
-                    ))
-                } catch (_: Exception) {}
+        try {
+            val resourceId = getResourceId(TipoLoteria.EUROMILLONES.archivoCSV)
+            if (resourceId == 0) return resultados
+            
+            context.resources.openRawResource(resourceId).use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readLine() // Saltar cabecera
+                    
+                    var linea: String?
+                    while (reader.readLine().also { linea = it } != null) {
+                        linea?.let { line ->
+                            val campos = line.split(",")
+                            if (campos.size >= 8) {
+                                try {
+                                    val resultado = ResultadoEuromillones(
+                                        fecha = campos[0].trim(),
+                                        numeros = listOf(
+                                            campos[1].trim().toInt(),
+                                            campos[2].trim().toInt(),
+                                            campos[3].trim().toInt(),
+                                            campos[4].trim().toInt(),
+                                            campos[5].trim().toInt()
+                                        ),
+                                        estrellas = listOf(
+                                            campos[6].trim().toInt(),
+                                            campos[7].trim().toInt()
+                                        )
+                                    )
+                                    resultados.add(resultado)
+                                } catch (e: NumberFormatException) {
+                                    // Ignorar líneas con formato incorrecto
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return resultados.reversed()
+        
+        return resultados
     }
 
     /**
-     * Lee el histórico de El Gordo de la Primitiva.
+     * Lee el histórico de El Gordo de la Primitiva desde CSV.
      */
-    suspend fun leerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> {
+    fun leerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> {
         val resultados = mutableListOf<ResultadoGordoPrimitiva>()
-        val lineas = obtenerLineasActualizadas(TipoLoteria.GORDO_PRIMITIVA.archivoCSV)
         
-        lineas.drop(1).filter { it.isNotBlank() }.forEach { line ->
-            val campos = line.split(",").map { it.trim() }
-            if (campos.size >= 7) {
-                try {
-                    resultados.add(ResultadoGordoPrimitiva(
-                        fecha = campos[0],
-                        numeros = (1..5).map { campos[it].toInt() },
-                        numeroClave = campos[6].toInt()
-                    ))
-                } catch (_: Exception) {}
+        try {
+            val resourceId = getResourceId(TipoLoteria.GORDO_PRIMITIVA.archivoCSV)
+            if (resourceId == 0) return resultados
+            
+            context.resources.openRawResource(resourceId).use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readLine() // Saltar cabecera
+                    
+                    var linea: String?
+                    while (reader.readLine().also { linea = it } != null) {
+                        linea?.let { line ->
+                            val campos = line.split(",")
+                            if (campos.size >= 7) {
+                                try {
+                                    val resultado = ResultadoGordoPrimitiva(
+                                        fecha = campos[0].trim(),
+                                        numeros = listOf(
+                                            campos[1].trim().toInt(),
+                                            campos[2].trim().toInt(),
+                                            campos[3].trim().toInt(),
+                                            campos[4].trim().toInt(),
+                                            campos[5].trim().toInt()
+                                        ),
+                                        numeroClave = campos[6].trim().toInt()
+                                    )
+                                    resultados.add(resultado)
+                                } catch (e: NumberFormatException) {
+                                    // Ignorar líneas con formato incorrecto
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return resultados.reversed()
+        
+        return resultados
     }
 
     /**
-     * Lee el histórico de Lotería Nacional o El Niño.
+     * Lee el histórico de Lotería Nacional o El Niño desde CSV.
      */
-    suspend fun leerHistoricoNacional(tipoLoteria: TipoLoteria): List<ResultadoNacional> {
+    fun leerHistoricoNacional(tipoLoteria: TipoLoteria): List<ResultadoNacional> {
         val resultados = mutableListOf<ResultadoNacional>()
-        val lineas = obtenerLineasActualizadas(tipoLoteria.archivoCSV)
         
-        lineas.drop(1).filter { it.isNotBlank() }.forEach { line ->
-            val campos = line.split(",").map { it.trim() }
-            if (campos.size >= 7) {
-                try {
-                    resultados.add(ResultadoNacional(
-                        fecha = campos[0],
-                        primerPremio = campos[1],
-                        segundoPremio = campos[2],
-                        reintegros = (3..6).map { campos[it].toInt() }
-                    ))
-                } catch (_: Exception) {}
+        try {
+            val resourceId = getResourceId(tipoLoteria.archivoCSV)
+            if (resourceId == 0) return resultados
+            
+            context.resources.openRawResource(resourceId).use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readLine() // Saltar cabecera
+                    
+                    var linea: String?
+                    while (reader.readLine().also { linea = it } != null) {
+                        linea?.let { line ->
+                            val campos = line.split(",")
+                            if (campos.size >= 7) {
+                                try {
+                                    val resultado = ResultadoNacional(
+                                        fecha = campos[0].trim(),
+                                        primerPremio = campos[1].trim(),
+                                        segundoPremio = campos[2].trim(),
+                                        reintegros = listOf(
+                                            campos[3].trim().toInt(),
+                                            campos[4].trim().toInt(),
+                                            campos[5].trim().toInt(),
+                                            campos[6].trim().toInt()
+                                        )
+                                    )
+                                    resultados.add(resultado)
+                                } catch (e: NumberFormatException) {
+                                    // Ignorar líneas con formato incorrecto
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return resultados.reversed()
+        
+        return resultados
     }
 
     /**
-     * Lee el histórico de El Gordo de Navidad.
+     * Lee el histórico de El Gordo de Navidad desde CSV.
      */
-    suspend fun leerHistoricoNavidad(): List<ResultadoNavidad> {
+    fun leerHistoricoNavidad(): List<ResultadoNavidad> {
         val resultados = mutableListOf<ResultadoNavidad>()
-        val lineas = obtenerLineasActualizadas(TipoLoteria.NAVIDAD.archivoCSV)
         
-        lineas.drop(1).filter { it.isNotBlank() }.forEach { line ->
-            val campos = line.split(",").map { it.trim() }
-            if (campos.size >= 8) {
-                try {
-                    resultados.add(ResultadoNavidad(
-                        fecha = campos[0],
-                        gordo = campos[1],
-                        segundo = campos[2],
-                        tercero = campos[3],
-                        reintegros = (4..7).map { campos[it].toInt() }
-                    ))
-                } catch (_: Exception) {}
+        try {
+            val resourceId = getResourceId(TipoLoteria.NAVIDAD.archivoCSV)
+            if (resourceId == 0) return resultados
+            
+            context.resources.openRawResource(resourceId).use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readLine() // Saltar cabecera
+                    
+                    var linea: String?
+                    while (reader.readLine().also { linea = it } != null) {
+                        linea?.let { line ->
+                            val campos = line.split(",")
+                            if (campos.size >= 8) {
+                                try {
+                                    val resultado = ResultadoNavidad(
+                                        fecha = campos[0].trim(),
+                                        gordo = campos[1].trim(),
+                                        segundo = campos[2].trim(),
+                                        tercero = campos[3].trim(),
+                                        reintegros = listOf(
+                                            campos[4].trim().toInt(),
+                                            campos[5].trim().toInt(),
+                                            campos[6].trim().toInt(),
+                                            campos[7].trim().toInt()
+                                        )
+                                    )
+                                    resultados.add(resultado)
+                                } catch (e: NumberFormatException) {
+                                    // Ignorar líneas con formato incorrecto
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return resultados.reversed()
+        
+        return resultados
     }
 
-    @SuppressLint("DiscouragedApi")
+    /**
+     * Obtiene el ID del recurso raw a partir del nombre del archivo.
+     */
     private fun getResourceId(nombreArchivo: String): Int {
         val nombreRecurso = nombreArchivo.replace(".csv", "")
         return context.resources.getIdentifier(
@@ -182,6 +264,10 @@ class LoteriaLocalDataSource(private val context: Context) {
         )
     }
 
+    /**
+     * Filtra resultados por rango de fechas.
+     * Las fechas deben estar en formato YYYY-MM-DD.
+     */
     companion object {
         fun <T : ResultadoSorteo> filtrarPorFechas(
             resultados: List<T>,
