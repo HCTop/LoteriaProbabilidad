@@ -32,7 +32,7 @@ jobs:
       - name: Ejecutar script de descarga
         run: |
           cd scripts
-          python descargar_historicos.py --all
+          python actualizar_datos.py
         timeout-minutes: 30
       
       - name: Verificar archivos generados
