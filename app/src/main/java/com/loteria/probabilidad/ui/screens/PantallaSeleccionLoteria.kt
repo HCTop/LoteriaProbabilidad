@@ -48,7 +48,10 @@ fun PantallaSeleccionLoteria(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Lotería Probabilidad", fontWeight = FontWeight.Bold)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { paddingValues ->
@@ -64,10 +67,22 @@ fun PantallaSeleccionLoteria(
             
             Text("Loterías de números", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             
-            LoteriaButton(TipoLoteria.PRIMITIVA) { onLoteriaSeleccionada(TipoLoteria.PRIMITIVA) }
-            LoteriaButton(TipoLoteria.BONOLOTO) { onLoteriaSeleccionada(TipoLoteria.BONOLOTO) }
-            LoteriaButton(TipoLoteria.EUROMILLONES) { onLoteriaSeleccionada(TipoLoteria.EUROMILLONES) }
-            LoteriaButton(TipoLoteria.GORDO_PRIMITIVA) { onLoteriaSeleccionada(TipoLoteria.GORDO_PRIMITIVA) }
+            LoteriaButton(
+                tipoLoteria = TipoLoteria.PRIMITIVA,
+                onClick = { onLoteriaSeleccionada(TipoLoteria.PRIMITIVA) }
+            )
+            LoteriaButton(
+                tipoLoteria = TipoLoteria.BONOLOTO,
+                onClick = { onLoteriaSeleccionada(TipoLoteria.BONOLOTO) }
+            )
+            LoteriaButton(
+                tipoLoteria = TipoLoteria.EUROMILLONES,
+                onClick = { onLoteriaSeleccionada(TipoLoteria.EUROMILLONES) }
+            )
+            LoteriaButton(
+                tipoLoteria = TipoLoteria.GORDO_PRIMITIVA,
+                onClick = { onLoteriaSeleccionada(TipoLoteria.GORDO_PRIMITIVA) }
+            )
             
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -80,9 +95,13 @@ fun PantallaSeleccionLoteria(
                     Text("Pulsa para obtener los sorteos oficiales de Lotoideas (incluyendo el día 8).", 
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     
-                    mensajeDescarga?.let {
-                        Text(it, color = if(it.contains("✅")) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(vertical = 8.dp))
+                    mensajeDescarga?.let { mensaje ->
+                        Text(
+                            mensaje, 
+                            color = if(mensaje.contains("✅")) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall, 
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
                     }
 
                     Button(
@@ -100,7 +119,7 @@ fun PantallaSeleccionLoteria(
                                             }
                                         }
                                         withContext(Dispatchers.Main) { mensajeDescarga = "✅ Datos reales actualizados con éxito." }
-                                    } catch (e: Exception) {
+                                    } catch (_: Exception) {
                                         withContext(Dispatchers.Main) { mensajeDescarga = "❌ Error: Verifica tu internet." }
                                     }
                                 }
