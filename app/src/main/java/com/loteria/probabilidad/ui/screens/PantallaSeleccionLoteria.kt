@@ -153,7 +153,7 @@ fun PantallaSeleccionLoteria(
             
             Spacer(modifier = Modifier.height(24.dp))
             
-            // Botón de descarga forzada de CSV
+            // Botón de actualización de CSV desde GitHub
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -171,8 +171,8 @@ fun PantallaSeleccionLoteria(
                     )
                     
                     Text(
-                        "Los datos se cargan automáticamente desde los recursos de la app. " +
-                        "Si tienes problemas, puedes verificar los datos.",
+                        "Pulsa para descargar los últimos datos desde GitHub. " +
+                        "Se actualizan automáticamente cada noche.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -186,61 +186,103 @@ fun PantallaSeleccionLoteria(
                             style = MaterialTheme.typography.bodySmall,
                             color = if (mensaje.contains("✅")) MaterialTheme.colorScheme.primary 
                                    else if (mensaje.contains("❌")) MaterialTheme.colorScheme.error
+                                   else if (mensaje.contains("⬇️")) MaterialTheme.colorScheme.tertiary
                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
                     
+                    // Botón único para descargar y verificar
                     Button(
                         onClick = {
                             scope.launch {
                                 descargando = true
-                                mensajeDescarga = "🔄 Verificando datos..."
+                                mensajeDescarga = "🔄 Conectando..."
+                                
+                                // URL base de GitHub - CAMBIAR POR TU USUARIO
+                                val baseUrl = "https://raw.githubusercontent.com/TU_USUARIO/LoteriaProbabilidad/main/app/src/main/res/raw"
+                                
+                                val csvFiles = listOf(
+                                    "historico_primitiva.csv",
+                                    "historico_bonoloto.csv",
+                                    "historico_euromillones.csv",
+                                    "historico_gordo_primitiva.csv",
+                                    "historico_loteria_nacional.csv",
+                                    "historico_navidad.csv",
+                                    "historico_nino.csv"
+                                )
+                                
+                                var descargados = 0
+                                var totalLineas = 0
+                                var ultimaFecha = ""
+                                var primeraFecha = ""
+                                var usandoLocal = false
                                 
                                 withContext(Dispatchers.IO) {
-                                    try {
-                                        // Verificar que los CSV existen en resources
-                                        val csvFiles = listOf(
-                                            "historico_primitiva.csv",
-                                            "historico_bonoloto.csv",
-                                            "historico_euromillones.csv",
-                                            "historico_gordo_primitiva.csv",
-                                            "historico_loteria_nacional.csv",
-                                            "historico_navidad.csv",
-                                            "historico_nino.csv"
-                                        )
+                                    for (csvFile in csvFiles) {
+                                        withContext(Dispatchers.Main) {
+                                            mensajeDescarga = "⬇️ $csvFile..."
+                                        }
                                         
-                                        var totalLineas = 0
-                                        var archivosOk = 0
+                                        var content: String? = null
                                         
-                                        for (csvFile in csvFiles) {
+                                        // Intentar descargar desde GitHub
+                                        try {
+                                            val url = URL("$baseUrl/$csvFile")
+                                            val connection = url.openConnection()
+                                            connection.connectTimeout = 10000
+                                            connection.readTimeout = 30000
+                                            connection.setRequestProperty("User-Agent", "LoteriaProbabilidad-App")
+                                            
+                                            val inputStream = connection.getInputStream()
+                                            content = inputStream.bufferedReader().readText()
+                                            inputStream.close()
+                                            
+                                            // Guardar en archivos internos
+                                            val outputFile = File(context.filesDir, csvFile)
+                                            outputFile.writeText(content)
+                                            
+                                        } catch (e: Exception) {
+                                            // Fallback a recurso local
+                                            usandoLocal = true
                                             try {
                                                 val resourceName = csvFile.replace(".csv", "")
                                                 val resId = context.resources.getIdentifier(
                                                     resourceName, "raw", context.packageName
                                                 )
                                                 if (resId != 0) {
-                                                    val inputStream = context.resources.openRawResource(resId)
-                                                    val lines = inputStream.bufferedReader().readLines().size
-                                                    inputStream.close()
-                                                    totalLineas += lines
-                                                    archivosOk++
+                                                    val localStream = context.resources.openRawResource(resId)
+                                                    content = localStream.bufferedReader().readText()
+                                                    localStream.close()
                                                 }
-                                            } catch (e: Exception) {
-                                                // Archivo no encontrado
+                                            } catch (localError: Exception) {
+                                                // Ignorar
                                             }
                                         }
                                         
-                                        withContext(Dispatchers.Main) {
-                                            mensajeDescarga = if (archivosOk == csvFiles.size) {
-                                                "✅ $archivosOk archivos verificados, $totalLineas sorteos totales"
-                                            } else {
-                                                "⚠️ $archivosOk/${csvFiles.size} archivos, $totalLineas sorteos"
+                                        // Contar líneas y extraer fechas
+                                        content?.let { txt ->
+                                            val lines = txt.lines()
+                                            totalLineas += lines.size - 1
+                                            descargados++
+                                            
+                                            // Extraer fechas de Primitiva
+                                            if (csvFile == "historico_primitiva.csv" && lines.size > 1) {
+                                                ultimaFecha = lines[1].split(",").firstOrNull() ?: ""
+                                                primeraFecha = lines.filter { it.isNotBlank() }.lastOrNull()?.split(",")?.firstOrNull() ?: ""
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        withContext(Dispatchers.Main) {
-                                            mensajeDescarga = "❌ Error: ${e.message}"
+                                    }
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        val fuente = if (usandoLocal) " (local)" else " (GitHub)"
+                                        mensajeDescarga = if (descargados == csvFiles.size) {
+                                            "✅ $descargados archivos$fuente\n📊 $totalLineas sorteos\n📅 $primeraFecha → $ultimaFecha"
+                                        } else if (descargados > 0) {
+                                            "⚠️ $descargados/${csvFiles.size} archivos\n📊 $totalLineas sorteos"
+                                        } else {
+                                            "❌ Sin conexión\nComprueba tu red"
                                         }
                                     }
                                 }
@@ -258,11 +300,11 @@ fun PantallaSeleccionLoteria(
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Verificando...")
+                            Text("Descargando...")
                         } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Icon(Icons.Default.CloudDownload, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Verificar datos históricos")
+                            Text("🔄 Actualizar datos históricos")
                         }
                     }
                 }

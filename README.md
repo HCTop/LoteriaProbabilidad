@@ -1,6 +1,20 @@
 # 🎰 Lotería Probabilidad
 
-Aplicación Android para analizar históricos de loterías españolas y generar combinaciones basadas en diferentes métodos de cálculo de probabilidad.
+**Versión: 2.3.0** | **Última actualización: 2026-01-11 10:20 UTC**
+
+Aplicación Android para analizar históricos de loterías españolas y generar combinaciones basadas en diferentes métodos de cálculo de probabilidad, incluyendo IA con algoritmos genéticos.
+
+## 📊 Datos REALES incluidos
+
+| Lotería | Sorteos | Fuente |
+|---------|---------|--------|
+| Primitiva | 317 | laprimitiva.info (2023-2025) |
+| Bonoloto | 313 | Datos reales |
+| Euromillones | 20 | Datos reales |
+| Gordo | 10 | Datos reales |
+| Nacional | 10 | Datos reales |
+| **Navidad** | **40** | **VERIFICADO OFICIAL** |
+| **Niño** | **36** | **VERIFICADO OFICIAL** |
 
 ## ✨ Características
 
@@ -17,28 +31,35 @@ Aplicación Android para analizar históricos de loterías españolas y generar 
 
 ### 🧮 Métodos de cálculo
 
-1. **Regla de Laplace** - Probabilidad teórica pura: `P(A) = casos favorables / casos posibles`
-2. **Análisis de Frecuencias** - Basado en histórico de apariciones
-3. **Números Calientes** - Los más frecuentes en sorteos recientes
-4. **Números Fríos** - Los menos frecuentes (teoría del equilibrio)
+1. **Regla de Laplace** - Probabilidad teórica pura
+2. **Análisis de Frecuencias** - Basado en histórico
+3. **Números Calientes** - Los más frecuentes recientes
+4. **Números Fríos** - Los menos frecuentes
 5. **Equilibrio Estadístico** - Mezcla de calientes y fríos
-6. **Probabilidad Condicional** - Números que suelen salir juntos
-7. **Desviación de la Media** - Números alejados de su frecuencia esperada
-8. **Aleatorio Puro** - Selección completamente al azar
+6. **Probabilidad Condicional** - Números que salen juntos
+7. **Desviación de la Media** - Alejados de frecuencia esperada
+8. **Aleatorio Puro** - Selección al azar
+9. **🤖 IA Genética** - Algoritmo evolutivo con aprendizaje
 
-### 📅 Filtro por rango de fechas
-- Todo el histórico
-- Últimos 5/10/20 años
-- Años específicos
-- Rangos personalizados
+### 🧠 Sistema de IA con Aprendizaje
+- Algoritmo genético con 500 individuos y 50 generaciones
+- 6 predictores en ensemble (frecuencia, temperatura, parejas, gaps, tendencias, dígitos)
+- **Memoria persistente** por lotería con pesos adaptativos
+- Servicio en segundo plano para entrenamiento (hasta 500 iteraciones)
+- Sistema de niveles (1-6) según entrenamientos acumulados
 
-### 📊 Datos históricos incluidos
-- **Primitiva**: ~6,300 sorteos (desde 1985)
-- **Bonoloto**: ~11,850 sorteos (desde 1988)
-- **Euromillones**: ~2,285 sorteos (desde 2004)
-- **Gordo Primitiva**: ~1,057 sorteos (desde 2005)
-- **Lotería Nacional**: ~4,280 sorteos
-- **Navidad/Niño**: ~41 sorteos cada uno
+### 📊 Backtesting Avanzado
+- Validación walk-forward con datos históricos reales
+- **Debug log persistente** (se mantiene hasta el día siguiente)
+- **Resultados guardados** del último entrenamiento
+- Categorías de aciertos extendidas: 5✓, 6🎯, +C, +R, +⭐, +K
+- Navegación directa desde notificación de progreso
+
+### 🔄 Actualización de datos desde GitHub
+- **Botón "Actualizar desde GitHub"** en pantalla principal
+- Descarga automática de CSVs actualizados
+- Prioriza datos descargados sobre recursos embebidos
+- Muestra rango de fechas disponible
 
 ## 🔄 Actualización automática de datos (GitHub Actions)
 
