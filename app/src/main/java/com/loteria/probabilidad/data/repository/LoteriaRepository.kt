@@ -11,7 +11,7 @@ class LoteriaRepository(private val localDataSource: LoteriaLocalDataSource) {
     /**
      * Obtiene el histórico según el tipo de lotería.
      */
-    fun obtenerHistorico(tipoLoteria: TipoLoteria): List<ResultadoSorteo> {
+    suspend fun obtenerHistorico(tipoLoteria: TipoLoteria): List<ResultadoSorteo> {
         return when (tipoLoteria) {
             TipoLoteria.PRIMITIVA,
             TipoLoteria.BONOLOTO -> localDataSource.leerHistoricoPrimitiva(tipoLoteria)
@@ -30,37 +30,37 @@ class LoteriaRepository(private val localDataSource: LoteriaLocalDataSource) {
     /**
      * Obtiene el número total de sorteos en el histórico.
      */
-    fun contarSorteos(tipoLoteria: TipoLoteria): Int {
+    suspend fun contarSorteos(tipoLoteria: TipoLoteria): Int {
         return obtenerHistorico(tipoLoteria).size
     }
     
     // Métodos específicos para backtesting
     
-    fun obtenerHistoricoPrimitiva(): List<ResultadoPrimitiva> {
+    suspend fun obtenerHistoricoPrimitiva(): List<ResultadoPrimitiva> {
         return localDataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA)
     }
     
-    fun obtenerHistoricoBonoloto(): List<ResultadoPrimitiva> {
+    suspend fun obtenerHistoricoBonoloto(): List<ResultadoPrimitiva> {
         return localDataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO)
     }
     
-    fun obtenerHistoricoEuromillones(): List<ResultadoEuromillones> {
+    suspend fun obtenerHistoricoEuromillones(): List<ResultadoEuromillones> {
         return localDataSource.leerHistoricoEuromillones()
     }
     
-    fun obtenerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> {
+    suspend fun obtenerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> {
         return localDataSource.leerHistoricoGordoPrimitiva()
     }
     
-    fun obtenerHistoricoNacional(): List<ResultadoNacional> {
+    suspend fun obtenerHistoricoNacional(): List<ResultadoNacional> {
         return localDataSource.leerHistoricoNacional(TipoLoteria.LOTERIA_NACIONAL)
     }
     
-    fun obtenerHistoricoNavidad(): List<ResultadoNavidad> {
+    suspend fun obtenerHistoricoNavidad(): List<ResultadoNavidad> {
         return localDataSource.leerHistoricoNavidad()
     }
     
-    fun obtenerHistoricoNino(): List<ResultadoNacional> {
+    suspend fun obtenerHistoricoNino(): List<ResultadoNacional> {
         return localDataSource.leerHistoricoNacional(TipoLoteria.NINO)
     }
 }

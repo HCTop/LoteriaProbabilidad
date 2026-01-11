@@ -20,12 +20,13 @@ class ObtenerCombinacionesUseCase(
      * @param rangoFechas Rango de fechas para filtrar el histórico (opcional)
      * @param metodo Método de cálculo de probabilidad a usar
      */
-    fun ejecutar(
+    suspend fun ejecutar(
         tipoLoteria: TipoLoteria,
         numCombinaciones: Int = 5,
         rangoFechas: RangoFechas = RangoFechas.TODO,
         metodo: MetodoCalculo = MetodoCalculo.FRECUENCIAS
     ): AnalisisProbabilidad {
+        // Ahora es una llamada suspend para permitir la descarga de internet
         val historicoCompleto = repository.obtenerHistorico(tipoLoteria)
         
         // Filtrar por fechas
