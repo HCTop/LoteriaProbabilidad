@@ -3,20 +3,24 @@ package com.loteria.probabilidad.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.loteria.probabilidad.MainActivity
-import com.loteria.probabilidad.R
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
 import com.loteria.probabilidad.domain.ml.MemoriaIA
 import kotlinx.coroutines.*
 
 /**
- * Servicio que ejecuta el aprendizaje de IA en segundo plano.
- * Permite que el backtesting continúe incluso con la pantalla apagada.
+ * Servicio de aprendizaje en segundo plano v3.
+ * - Solicita desactivar optimización de batería
+ * - WakeLock agresivo
+ * - Notificación de máxima prioridad
+ * - Continúa al cerrar la app
  */
 class AprendizajeService : Service() {
     
@@ -32,30 +36,47 @@ class AprendizajeService : Service() {
         const val EXTRA_ITERACIONES = "iteraciones"
         const val EXTRA_OPEN_BACKTESTING = "open_backtesting"
         
-        // Estado compartido para la UI
-        var isRunning = false
-        var progreso = 0
-        var iteracionActual = 0
-        var totalIteraciones = 0
-        var ultimoLog = ""
-        var entrenamientosCompletados = 0
-        var tipoLoteriaActual = ""  // Lotería que se está procesando AHORA
-        var tipoLoteriaIniciada = "" // Lotería que inició el proceso (para verificación)
+        @Volatile var isRunning = false
+        @Volatile var progreso = 0
+        @Volatile var iteracionActual = 0
+        @Volatile var totalIteraciones = 0
+        @Volatile var ultimoLog = ""
+        @Volatile var entrenamientosCompletados = 0
+        @Volatile var tipoLoteriaActual = ""
+        @Volatile var mejorPuntuacion = 0.0
+        @Volatile var ultimaActualizacion = System.currentTimeMillis()
         
-        // Verificar si hay un servicio corriendo para una lotería específica
         fun isRunningFor(tipoLoteria: String): Boolean {
             return isRunning && tipoLoteriaActual == tipoLoteria
         }
         
-        fun startLearning(
-            context: Context,
-            tipoLoteria: String,
-            sorteos: Int,
-            iteraciones: Int
-        ) {
-            // IMPORTANTE: Guardar la lotería que inició el proceso
+        /** Verifica si la app está exenta de optimización de batería */
+        fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            return pm.isIgnoringBatteryOptimizations(context.packageName)
+        }
+        
+        /** Solicita al usuario desactivar la optimización de batería */
+        fun requestIgnoreBatteryOptimizations(context: Context) {
+            if (!isIgnoringBatteryOptimizations(context)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+        
+        fun startLearning(context: Context, tipoLoteria: String, sorteos: Int, iteraciones: Int) {
             tipoLoteriaActual = tipoLoteria
-            tipoLoteriaIniciada = tipoLoteria
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
@@ -70,16 +91,14 @@ class AprendizajeService : Service() {
         }
         
         fun stopLearning(context: Context) {
-            val intent = Intent(context, AprendizajeService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            isRunning = false
+            context.startService(Intent(context, AprendizajeService::class.java).apply { action = ACTION_STOP })
         }
     }
     
     private var wakeLock: PowerManager.WakeLock? = null
     private var job: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     
     override fun onCreate() {
         super.onCreate()
@@ -90,36 +109,42 @@ class AprendizajeService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 val tipoLoteria = intent.getStringExtra(EXTRA_TIPO_LOTERIA) ?: "PRIMITIVA"
-                val sorteos = intent.getIntExtra(EXTRA_SORTEOS, 100)
-                val iteraciones = intent.getIntExtra(EXTRA_ITERACIONES, 10)
+                val sorteos = intent.getIntExtra(EXTRA_SORTEOS, 50)
+                val iteraciones = intent.getIntExtra(EXTRA_ITERACIONES, 30)
                 
-                startForeground(NOTIFICATION_ID, createNotification("Iniciando aprendizaje...", 0))
+                startForeground(NOTIFICATION_ID, createNotification("Preparando...", 0))
                 acquireWakeLock()
                 startLearningProcess(tipoLoteria, sorteos, iteraciones)
             }
-            ACTION_STOP -> {
-                stopLearningProcess()
-            }
+            ACTION_STOP -> stopLearningProcess()
         }
-        return START_NOT_STICKY
+        return START_STICKY
+    }
+    
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // El servicio continúa cuando el usuario cierra la app
     }
     
     private fun startLearningProcess(tipoLoteria: String, sorteos: Int, iteraciones: Int) {
+        job?.cancel()
+        
         isRunning = true
         progreso = 0
         iteracionActual = 0
         totalIteraciones = iteraciones
         entrenamientosCompletados = 0
+        mejorPuntuacion = 0.0
+        tipoLoteriaActual = tipoLoteria
         
-        job = scope.launch {
+        job = serviceScope.launch {
             try {
                 val calculador = CalculadorProbabilidad(this@AprendizajeService)
                 val memoriaIA = MemoriaIA(this@AprendizajeService)
-                
-                // Cargar histórico UNA SOLA VEZ (optimización)
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
                 
-                // Pre-cargar datos según tipo
+                updateNotification("Cargando $tipoLoteria...", 0)
+                
                 val historicoPrecargado: Any = when (tipoLoteria) {
                     "PRIMITIVA" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA)
                     "BONOLOTO" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO)
@@ -136,132 +161,110 @@ class AprendizajeService : Service() {
                     
                     iteracionActual = i
                     progreso = ((i.toFloat() / iteraciones) * 100).toInt()
-                    ultimoLog = "Iteración $i de $iteraciones para $tipoLoteria"
+                    ultimaActualizacion = System.currentTimeMillis()
                     
-                    // Actualizar notificación cada 5 iteraciones para no sobrecargar
-                    if (i % 5 == 1 || i == iteraciones) {
-                        updateNotification("Aprendiendo $tipoLoteria: $i/$iteraciones", progreso)
-                    }
+                    val resultados = ejecutarIteracion(tipoLoteria, calculador, memoriaIA, historicoPrecargado, sorteos)
                     
-                    // Ejecutar backtesting según tipo (usando datos precargados)
-                    val resultados = when (tipoLoteria) {
-                        "PRIMITIVA" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoPrimitiva>
-                            val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
-                            calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
-                            results
-                        }
-                        "BONOLOTO" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoPrimitiva>
-                            val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
-                            calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
-                            results
-                        }
-                        "EUROMILLONES" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoEuromillones>
-                            val results = calculador.ejecutarBacktestEuromillones(historico, sorteos)
-                            val historicoComun = historico.map { euro -> ResultadoPrimitiva(euro.fecha, euro.numeros, 0, 0) }
-                            calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
-                            results
-                        }
-                        "GORDO_PRIMITIVA" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoGordoPrimitiva>
-                            val results = calculador.ejecutarBacktestGordo(historico, sorteos)
-                            val historicoComun = historico.map { gordo -> ResultadoPrimitiva(gordo.fecha, gordo.numeros, 0, 0) }
-                            calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
-                            results
-                        }
-                        "LOTERIA_NACIONAL" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoNacional>
-                            val results = calculador.ejecutarBacktestNacional(historico, sorteos)
-                            // Convertir a formato para aprendizaje usando TERMINACIONES
-                            val historicoComun = historico.map { nac -> 
-                                val num = nac.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
-                                val terminaciones = listOf(
-                                    num.takeLast(2).toIntOrNull() ?: 0,        // Terminación 2 cifras (0-99)
-                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,  // Última cifra (1-10)
-                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11, // Decena (11-20)
-                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21, // Centena mod (21-120)
-                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,    // Mod 50 (1-50)
-                                    nac.reintegros.firstOrNull()?.plus(41) ?: 41 // Reintegro (41-50)
-                                ).map { it.coerceIn(1, 99) }
-                                ResultadoPrimitiva(nac.fecha, terminaciones, 0, nac.reintegros.firstOrNull() ?: 0)
-                            }
-                            calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
-                            results
-                        }
-                        "NAVIDAD" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoNavidad>
-                            val results = calculador.ejecutarBacktestNavidad(historico, sorteos)
-                            val historicoComun = historico.map { nav -> 
-                                val num = nav.gordo.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
-                                val terminaciones = listOf(
-                                    num.takeLast(2).toIntOrNull() ?: 0,
-                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
-                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
-                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
-                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
-                                    nav.reintegros.firstOrNull()?.plus(41) ?: 41
-                                ).map { it.coerceIn(1, 99) }
-                                ResultadoPrimitiva(nav.fecha, terminaciones, 0, nav.reintegros.firstOrNull() ?: 0)
-                            }
-                            calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
-                            results
-                        }
-                        "NINO" -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val historico = historicoPrecargado as List<ResultadoNacional>
-                            val results = calculador.ejecutarBacktestNacional(historico, sorteos, "NINO")
-                            val historicoComun = historico.map { nino -> 
-                                val num = nino.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
-                                val terminaciones = listOf(
-                                    num.takeLast(2).toIntOrNull() ?: 0,
-                                    (num.takeLast(1).toIntOrNull() ?: 0) + 1,
-                                    ((num.takeLast(2).toIntOrNull() ?: 0) / 10) + 11,
-                                    (num.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21,
-                                    (num.toIntOrNull()?.rem(50) ?: 0) + 1,
-                                    nino.reintegros.firstOrNull()?.plus(41) ?: 41
-                                ).map { it.coerceIn(1, 99) }
-                                ResultadoPrimitiva(nino.fecha, terminaciones, 0, nino.reintegros.firstOrNull() ?: 0)
-                            }
-                            calculador.aprenderDeBacktest(results, historicoComun, tipoLoteria, sorteos)
-                            results
-                        }
-                        else -> emptyList()
-                    }
+                    val mejorActual = resultados.maxOfOrNull { it.puntuacionTotal } ?: 0.0
+                    if (mejorActual > mejorPuntuacion) mejorPuntuacion = mejorActual
                     
-                    if (resultados.isNotEmpty()) {
-                        entrenamientosCompletados++
-                        val resumen = memoriaIA.obtenerResumenIA(tipoLoteria)
-                        ultimoLog = "✅ It.$i - ${resumen.nombreNivel}"
-                    }
+                    entrenamientosCompletados++
+                    ultimoLog = "It. $i: Mejor=${String.format("%.1f", mejorPuntuacion)}"
                     
-                    // Pausa mínima para no bloquear (50ms en lugar de 300ms = 6x más rápido)
-                    delay(50)
+                    updateNotification("$tipoLoteria: $i/$iteraciones", progreso)
+                    
+                    yield()
                 }
                 
-                ultimoLog = "🎉 ¡Completado! $entrenamientosCompletados iteraciones"
-                updateNotification("✅ Aprendizaje completado", 100)
+                if (isRunning) {
+                    progreso = 100
+                    ultimoLog = "✅ Completado: $iteraciones iteraciones"
+                    updateNotification("✅ $tipoLoteria: Completado", 100)
+                    delay(3000)
+                }
                 
+            } catch (e: CancellationException) {
+                ultimoLog = "⏹️ Detenido"
             } catch (e: Exception) {
                 ultimoLog = "❌ Error: ${e.message}"
-                updateNotification("❌ Error", progreso)
             } finally {
-                delay(3000) // Mostrar resultado final por 3 segundos
-                stopLearningProcess()
+                finishService()
             }
         }
+    }
+    
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun ejecutarIteracion(
+        tipoLoteria: String, calculador: CalculadorProbabilidad, 
+        memoriaIA: MemoriaIA, historicoPrecargado: Any, sorteos: Int
+    ): List<ResultadoBacktest> = withContext(Dispatchers.Default) {
+        when (tipoLoteria) {
+            "PRIMITIVA", "BONOLOTO" -> {
+                val historico = historicoPrecargado as List<ResultadoPrimitiva>
+                val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
+                results
+            }
+            "EUROMILLONES" -> {
+                val historico = historicoPrecargado as List<ResultadoEuromillones>
+                val results = calculador.ejecutarBacktestEuromillones(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, tipoLoteria, sorteos)
+                results
+            }
+            "GORDO_PRIMITIVA" -> {
+                val historico = historicoPrecargado as List<ResultadoGordoPrimitiva>
+                val results = calculador.ejecutarBacktestGordo(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, tipoLoteria, sorteos)
+                results
+            }
+            "LOTERIA_NACIONAL" -> {
+                val historico = historicoPrecargado as List<ResultadoNacional>
+                val results = calculador.ejecutarBacktestNacional(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico.map { convertirNacionalATerminaciones(it) }, tipoLoteria, sorteos)
+                results
+            }
+            "NAVIDAD" -> {
+                val historico = historicoPrecargado as List<ResultadoNavidad>
+                val results = calculador.ejecutarBacktestNavidad(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico.map { 
+                    val gordo = it.gordo.filter { c -> c.isDigit() }.takeLast(5).padStart(5, '0')
+                    convertirNumeroATerminaciones(gordo, it.fecha, it.reintegros)
+                }, tipoLoteria, sorteos)
+                results
+            }
+            "NINO" -> {
+                val historico = historicoPrecargado as List<ResultadoNacional>
+                val results = calculador.ejecutarBacktestNacional(historico, sorteos)
+                calculador.aprenderDeBacktest(results, historico.map { convertirNacionalATerminaciones(it) }, tipoLoteria, sorteos)
+                results
+            }
+            else -> emptyList()
+        }
+    }
+    
+    private fun convertirNacionalATerminaciones(nac: ResultadoNacional): ResultadoPrimitiva {
+        val num = nac.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
+        return convertirNumeroATerminaciones(num, nac.fecha, nac.reintegros)
+    }
+    
+    private fun convertirNumeroATerminaciones(numero: String, fecha: String, reintegros: List<Int>): ResultadoPrimitiva {
+        val term2 = numero.takeLast(2).toIntOrNull() ?: 0
+        val term1 = (numero.takeLast(1).toIntOrNull() ?: 0) + 1
+        val decena = ((numero.takeLast(2).toIntOrNull() ?: 0) / 10) + 11
+        val centena = (numero.takeLast(3).toIntOrNull()?.rem(100) ?: 0) + 21
+        val millar = (numero.takeLast(4).toIntOrNull()?.rem(50) ?: 0) + 1
+        val reint = reintegros.firstOrNull()?.plus(41) ?: 41
+        return ResultadoPrimitiva(fecha, listOf(term2, term1, decena, centena, millar, reint).map { it.coerceIn(1, 49) }, 0, reintegros.firstOrNull() ?: 0)
     }
     
     private fun stopLearningProcess() {
         isRunning = false
         job?.cancel()
+        finishService()
+    }
+    
+    private fun finishService() {
+        isRunning = false
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -269,92 +272,62 @@ class AprendizajeService : Service() {
     
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Aprendizaje de IA",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Notificaciones del proceso de aprendizaje de IA"
-                setShowBadge(false)
+            val channel = NotificationChannel(CHANNEL_ID, "Aprendizaje IA", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Proceso de aprendizaje en segundo plano"
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-            
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
     
     private fun createNotification(text: String, progress: Int): Notification {
-        val stopIntent = Intent(this, AprendizajeService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val stopPendingIntent = PendingIntent.getService(this, 0, 
+            Intent(this, AprendizajeService::class.java).apply { action = ACTION_STOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         
-        // Título con porcentaje visible
-        val titulo = if (progress in 1..99) {
-            "🧠 Aprendizaje IA: $progress%"
-        } else if (progress >= 100) {
-            "✅ Aprendizaje completado"
-        } else {
-            "🧠 Aprendizaje de IA"
-        }
+        val openPendingIntent = PendingIntent.getActivity(this, 1,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_BACKTESTING, true)
+                putExtra(EXTRA_TIPO_LOTERIA, tipoLoteriaActual)
+            }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         
-        // Subtítulo con más info
-        val subtitulo = if (iteracionActual > 0 && totalIteraciones > 0) {
-            "It. $iteracionActual/$totalIteraciones - $text"
-        } else {
-            text
+        val titulo = when {
+            progress >= 100 -> "✅ Completado"
+            progress > 0 -> "🧠 $progress% - It. $iteracionActual/$totalIteraciones"
+            else -> "🧠 Iniciando..."
         }
-        
-        // Intent para abrir la app en backtesting al clicar
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_BACKTESTING, true)
-            putExtra(EXTRA_TIPO_LOTERIA, tipoLoteriaActual)
-        }
-        val openPendingIntent = PendingIntent.getActivity(
-            this, 1, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(titulo)
-            .setContentText(subtitulo)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_rotate)
             .setOngoing(progress < 100)
-            .setProgress(100, progress, false)
-            .setContentIntent(openPendingIntent)  // Al clicar abre backtesting
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopPendingIntent)
+            .setProgress(100, progress, progress == 0)
+            .setContentIntent(openPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Parar", stopPendingIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
     
     private fun updateNotification(text: String, progress: Int) {
-        val notification = createNotification(text, progress)
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification)
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(text, progress))
     }
     
     private fun acquireWakeLock() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "LoteriaProbabilidad::AprendizajeWakeLock"
-        ).apply {
-            acquire(60 * 60 * 1000L) // Máximo 1 hora
+        if (wakeLock == null) {
+            wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LoteriaProbabilidad::IA")
+                .apply { setReferenceCounted(false); acquire() }
         }
     }
     
     private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-            }
-        }
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
     
@@ -365,6 +338,6 @@ class AprendizajeService : Service() {
         isRunning = false
         job?.cancel()
         releaseWakeLock()
-        scope.cancel()
+        serviceScope.cancel()
     }
 }

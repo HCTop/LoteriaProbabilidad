@@ -1489,56 +1489,46 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         diasAtras: Int = 10,
         tipoLoteria: String = "LOTERIA_NACIONAL"
     ): List<ResultadoBacktest> {
-        // SEGURIDAD: Ajustar diasAtras si es mayor que el histórico disponible
         val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
-        if (historico.size < 3) return emptyList()  // Mínimo 3 sorteos para hacer algo útil
+        if (historico.size < 3) return emptyList()
         
         val resultados = mutableListOf<ResultadoBacktest>()
         
         for (metodo in MetodoCalculo.values()) {
-            var aciertos0 = 0  // Sin coincidencia
+            var aciertos0 = 0
             var aciertos1 = 0  // Última cifra
             var aciertos2 = 0  // 2 últimas cifras (terminación)
             var aciertos3 = 0  // 3 últimas cifras
-            var aciertos4 = 0  // 4+ cifras o premio completo
+            var aciertos4 = 0  // 4+ cifras
             var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
             
             for (i in 0 until diasEfectivos) {
                 val historicoHastaMomento = historico.drop(i + 1)
-                if (historicoHastaMomento.isEmpty()) continue
+                if (historicoHastaMomento.size < 3) continue
                 
                 val sorteoReal = historico[i]
-                val numeroReal = sorteoReal.primerPremio.filter { it.isDigit() }.toIntOrNull() ?: 0
-                val terminacionReal = numeroReal % 100  // 2 últimas cifras
+                val numeroReal = sorteoReal.primerPremio.filter { it.isDigit() }.padStart(5, '0')
+                val terminacionReal = numeroReal.takeLast(2).toIntOrNull() ?: 0
+                val ultimaCifraReal = numeroReal.takeLast(1).toIntOrNull() ?: 0
                 val reintegrosReales = sorteoReal.reintegros.toSet()
                 
-                // Generar predicciones con el histórico de ese momento
-                val terminaciones = historicoHastaMomento.mapNotNull { 
-                    it.primerPremio.filter { c -> c.isDigit() }.toIntOrNull()?.rem(100)
-                }
-                if (terminaciones.isEmpty()) continue
+                // Generar predicciones según MÉTODO
+                val predicciones = generarPrediccionesNacional(historicoHastaMomento, metodo)
                 
-                val frecuencias = terminaciones.groupingBy { it }.eachCount()
-                val mejoresTerminaciones = frecuencias.entries
-                    .sortedByDescending { it.value }
-                    .take(5)
-                    .map { it.key }
-                
-                for (terminacionPredicha in mejoresTerminaciones) {
-                    // Contar cuántas cifras coinciden desde la derecha
+                for (prediccion in predicciones.take(5)) {
+                    val terminacionPred = prediccion % 100
+                    val ultimaCifraPred = prediccion % 10
+                    
                     val aciertosEnPrediccion = when {
-                        terminacionPredicha == terminacionReal -> 2  // Terminación completa
-                        terminacionPredicha % 10 == numeroReal % 10 -> 1  // Última cifra
+                        prediccion == (numeroReal.toIntOrNull() ?: 0) -> 5  // Número completo (casi imposible)
+                        terminacionPred == terminacionReal -> 2  // Terminación 2 cifras
+                        ultimaCifraPred == ultimaCifraReal -> 1  // Última cifra
                         else -> 0
                     }
                     
-                    // Verificar reintegro (última cifra del número)
-                    val ultimaCifraPredicha = terminacionPredicha % 10
-                    if (ultimaCifraPredicha in reintegrosReales) {
-                        aciertosReintegro++
-                    }
+                    if (ultimaCifraPred in reintegrosReales) aciertosReintegro++
                     
                     when (aciertosEnPrediccion) {
                         0 -> aciertos0++
@@ -1554,7 +1544,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             
             val totalCombinaciones = (diasEfectivos * 5).coerceAtLeast(1)
-            // Para Nacional, el scoring premia más las terminaciones acertadas
             val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
                              aciertosReintegro * 5.0) / totalCombinaciones * 100
             
@@ -1578,21 +1567,97 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
     
     /**
+     * Genera predicciones de terminaciones para Nacional/Navidad/Niño según método
+     */
+    private fun generarPrediccionesNacional(
+        historico: List<ResultadoNacional>,
+        metodo: MetodoCalculo
+    ): List<Int> {
+        val terminaciones = historico.mapNotNull { 
+            it.primerPremio.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
+        }
+        if (terminaciones.isEmpty()) return (0..99).shuffled().take(5)
+        
+        return when (metodo) {
+            MetodoCalculo.IA_GENETICA -> {
+                // Combinar múltiples estrategias con pesos
+                val porFrec = terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }.take(4).map { it.key }
+                val porRecientes = terminaciones.take(3)
+                val noSalieron = (0..99).filter { it !in terminaciones }.shuffled().take(3)
+                (porFrec + porRecientes + noSalieron).distinct().take(10)
+            }
+            MetodoCalculo.FRECUENCIAS -> {
+                // Terminaciones más frecuentes
+                terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .take(10).map { it.key }
+            }
+            MetodoCalculo.NUMEROS_CALIENTES -> {
+                // Terminaciones más frecuentes en sorteos recientes
+                val recientes = terminaciones.take(10)
+                recientes.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .map { it.key }.take(10)
+            }
+            MetodoCalculo.NUMEROS_FRIOS -> {
+                // Terminaciones con mayor gap (más tiempo sin salir)
+                val ultimaAparicion = mutableMapOf<Int, Int>()
+                terminaciones.forEachIndexed { idx, term -> ultimaAparicion[term] = idx }
+                (0..99).filter { ultimaAparicion[it] != null }
+                    .sortedBy { ultimaAparicion[it] ?: 0 }
+                    .take(10)
+            }
+            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
+                // Balance entre frecuentes e infrecuentes
+                val frecuencias = terminaciones.groupingBy { it }.eachCount()
+                val frecuentes = frecuencias.entries.sortedByDescending { it.value }.take(5).map { it.key }
+                val infrecuentes = (0..99).filter { it !in frecuencias.keys }.shuffled().take(5)
+                frecuentes + infrecuentes
+            }
+            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> {
+                // Terminaciones consecutivas a las últimas
+                val ultima = terminaciones.firstOrNull() ?: 50
+                listOf(
+                    (ultima + 1) % 100, (ultima - 1 + 100) % 100,
+                    (ultima + 10) % 100, (ultima - 10 + 100) % 100,
+                    (ultima + 11) % 100
+                ) + terminaciones.take(5)
+            }
+            MetodoCalculo.DESVIACION_MEDIA -> {
+                // Terminaciones cuya suma de dígitos sea similar a la media
+                val sumaMedia = terminaciones.take(10).map { it / 10 + it % 10 }.average().toInt()
+                (0..99).filter { (it / 10 + it % 10) in (sumaMedia - 2)..(sumaMedia + 2) }
+                    .shuffled().take(10)
+            }
+            MetodoCalculo.LAPLACE -> {
+                // Todos tienen la misma probabilidad, rotar por decenas
+                val ultimaDecena = (terminaciones.firstOrNull() ?: 0) / 10
+                val siguienteDecena = (ultimaDecena + 1) % 10
+                (siguienteDecena * 10 until siguienteDecena * 10 + 10).toList()
+            }
+            MetodoCalculo.ALEATORIO_PURO -> {
+                // Completamente aleatorio
+                (0..99).shuffled().take(10)
+            }
+        }
+    }
+    
+    /**
      * Ejecuta backtesting para Lotería de Navidad.
-     * Compara terminaciones del Gordo.
+     * Compara terminaciones del Gordo usando diferentes estrategias por método.
      */
     fun ejecutarBacktestNavidad(
         historico: List<ResultadoNavidad>,
         diasAtras: Int = 10
     ): List<ResultadoBacktest> {
-        // SEGURIDAD: Ajustar diasAtras si es mayor que el histórico disponible
         val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
-        if (historico.size < 3) return emptyList()  // Mínimo 3 sorteos para hacer algo útil
+        if (historico.size < 3) return emptyList()
         
         val resultados = mutableListOf<ResultadoBacktest>()
         
         for (metodo in MetodoCalculo.values()) {
-            var aciertos0 = 0  // Sin coincidencia
+            var aciertos0 = 0
             var aciertos1 = 0  // Última cifra
             var aciertos2 = 0  // 2 últimas cifras (terminación)
             var aciertos3 = 0  // 3 últimas cifras
@@ -1603,37 +1668,28 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             
             for (i in 0 until diasEfectivos) {
                 val historicoHastaMomento = historico.drop(i + 1)
-                if (historicoHastaMomento.isEmpty()) continue
+                if (historicoHastaMomento.size < 3) continue
                 
                 val sorteoReal = historico[i]
-                val gordoReal = sorteoReal.gordo.filter { it.isDigit() }.toIntOrNull() ?: 0
-                val terminacionReal = gordoReal % 100  // 2 últimas cifras
+                val gordoReal = sorteoReal.gordo.filter { it.isDigit() }.padStart(5, '0')
+                val terminacionReal = gordoReal.takeLast(2).toIntOrNull() ?: 0
+                val ultimaCifraReal = gordoReal.takeLast(1).toIntOrNull() ?: 0
                 val reintegrosReales = sorteoReal.reintegros.toSet()
                 
-                // Generar predicciones con el histórico de ese momento
-                val terminaciones = historicoHastaMomento.mapNotNull { 
-                    it.gordo.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
-                }
-                if (terminaciones.isEmpty()) continue
+                // Generar predicciones según MÉTODO
+                val predicciones = generarPrediccionesNavidad(historicoHastaMomento, metodo)
                 
-                val frecuencias = terminaciones.groupingBy { it }.eachCount()
-                val mejoresTerminaciones = frecuencias.entries
-                    .sortedByDescending { it.value }
-                    .take(5)
-                    .map { it.key }
-                
-                for (terminacionPredicha in mejoresTerminaciones) {
+                for (prediccion in predicciones.take(5)) {
+                    val terminacionPred = prediccion % 100
+                    val ultimaCifraPred = prediccion % 10
+                    
                     val aciertosEnPrediccion = when {
-                        terminacionPredicha == terminacionReal -> 2  // Terminación completa
-                        terminacionPredicha % 10 == gordoReal % 10 -> 1  // Última cifra
+                        terminacionPred == terminacionReal -> 2  // Terminación 2 cifras
+                        ultimaCifraPred == ultimaCifraReal -> 1  // Última cifra
                         else -> 0
                     }
                     
-                    // Verificar reintegro
-                    val ultimaCifraPredicha = terminacionPredicha % 10
-                    if (ultimaCifraPredicha in reintegrosReales) {
-                        aciertosReintegro++
-                    }
+                    if (ultimaCifraPred in reintegrosReales) aciertosReintegro++
                     
                     when (aciertosEnPrediccion) {
                         0 -> aciertos0++
@@ -1669,5 +1725,75 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         }
         
         return resultados.sortedByDescending { it.puntuacionTotal }
+    }
+    
+    /**
+     * Genera predicciones de terminaciones para Navidad según método
+     */
+    private fun generarPrediccionesNavidad(
+        historico: List<ResultadoNavidad>,
+        metodo: MetodoCalculo
+    ): List<Int> {
+        val terminaciones = historico.mapNotNull { 
+            it.gordo.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
+        }
+        if (terminaciones.isEmpty()) return (0..99).shuffled().take(5)
+        
+        return when (metodo) {
+            MetodoCalculo.IA_GENETICA -> {
+                // Combinar múltiples estrategias
+                val porFrec = terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }.take(4).map { it.key }
+                val porRecientes = terminaciones.take(3)
+                val porDecenas = terminaciones.map { it / 10 }.distinct().take(3).map { it * 10 + (0..9).random() }
+                (porFrec + porRecientes + porDecenas).distinct().take(10)
+            }
+            MetodoCalculo.FRECUENCIAS -> {
+                terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .take(10).map { it.key }
+            }
+            MetodoCalculo.NUMEROS_CALIENTES -> {
+                val recientes = terminaciones.take(5)
+                recientes.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .map { it.key }.take(10)
+            }
+            MetodoCalculo.NUMEROS_FRIOS -> {
+                val ultimaAparicion = mutableMapOf<Int, Int>()
+                terminaciones.forEachIndexed { idx, term -> ultimaAparicion[term] = idx }
+                (0..99).filter { ultimaAparicion[it] != null }
+                    .sortedBy { ultimaAparicion[it] ?: 0 }
+                    .take(10)
+            }
+            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
+                val frecuencias = terminaciones.groupingBy { it }.eachCount()
+                val frecuentes = frecuencias.entries.sortedByDescending { it.value }.take(5).map { it.key }
+                val nunca = (0..99).filter { it !in frecuencias.keys }.shuffled().take(5)
+                frecuentes + nunca
+            }
+            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> {
+                val ultima = terminaciones.firstOrNull() ?: 50
+                listOf(
+                    (ultima + 1) % 100, (ultima - 1 + 100) % 100,
+                    (ultima + 10) % 100, (ultima - 10 + 100) % 100,
+                    (ultima + 5) % 100, (ultima - 5 + 100) % 100
+                ) + terminaciones.take(4)
+            }
+            MetodoCalculo.DESVIACION_MEDIA -> {
+                val sumaMedia = terminaciones.take(10).map { it / 10 + it % 10 }.average().toInt()
+                (0..99).filter { (it / 10 + it % 10) in (sumaMedia - 2)..(sumaMedia + 2) }
+                    .shuffled().take(10)
+            }
+            MetodoCalculo.LAPLACE -> {
+                // Decenas frecuentes
+                val decenasFrecuentes = terminaciones.map { it / 10 }.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }.take(3).map { it.key }
+                decenasFrecuentes.flatMap { dec -> (dec * 10 until dec * 10 + 10).toList() }.shuffled().take(10)
+            }
+            MetodoCalculo.ALEATORIO_PURO -> {
+                (0..99).shuffled().take(10)
+            }
+        }
     }
 }
