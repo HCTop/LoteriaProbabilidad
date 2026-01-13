@@ -76,7 +76,15 @@ class AprendizajeService : Service() {
         }
         
         fun startLearning(context: Context, tipoLoteria: String, sorteos: Int, iteraciones: Int) {
+            // Resetear todas las variables al iniciar nuevo aprendizaje
             tipoLoteriaActual = tipoLoteria
+            mejorPuntuacion = 0.0
+            progreso = 0
+            iteracionActual = 0
+            totalIteraciones = iteraciones
+            entrenamientosCompletados = 0
+            ultimoLog = ""
+            
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
@@ -142,6 +150,7 @@ class AprendizajeService : Service() {
                 val calculador = CalculadorProbabilidad(this@AprendizajeService)
                 val memoriaIA = MemoriaIA(this@AprendizajeService)
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
+                val persistencia = com.loteria.probabilidad.domain.ml.BacktestPersistencia(this@AprendizajeService)
                 
                 updateNotification("Cargando $tipoLoteria...", 0)
                 
@@ -156,6 +165,9 @@ class AprendizajeService : Service() {
                     else -> emptyList<Any>()
                 }
                 
+                // Mapa para acumular los MEJORES resultados por método de TODAS las iteraciones
+                val mejoresResultadosPorMetodo = mutableMapOf<MetodoCalculo, ResultadoBacktest>()
+                
                 for (i in 1..iteraciones) {
                     if (!isRunning) break
                     
@@ -165,8 +177,18 @@ class AprendizajeService : Service() {
                     
                     val resultados = ejecutarIteracion(tipoLoteria, calculador, memoriaIA, historicoPrecargado, sorteos)
                     
-                    val mejorActual = resultados.maxOfOrNull { it.puntuacionTotal } ?: 0.0
-                    if (mejorActual > mejorPuntuacion) mejorPuntuacion = mejorActual
+                    // Actualizar mejores resultados por método
+                    for (resultado in resultados) {
+                        val mejorPrevio = mejoresResultadosPorMetodo[resultado.metodo]
+                        if (mejorPrevio == null || resultado.puntuacionTotal > mejorPrevio.puntuacionTotal) {
+                            mejoresResultadosPorMetodo[resultado.metodo] = resultado
+                        }
+                    }
+                    
+                    // Actualizar mejor puntuación global
+                    val mejorActualIteracion = resultados.maxOfOrNull { it.puntuacionTotal } ?: 0.0
+                    val mejorGlobal = mejoresResultadosPorMetodo.values.maxOfOrNull { it.puntuacionTotal } ?: 0.0
+                    mejorPuntuacion = mejorGlobal
                     
                     entrenamientosCompletados++
                     ultimoLog = "It. $i: Mejor=${String.format("%.1f", mejorPuntuacion)}"
@@ -176,7 +198,12 @@ class AprendizajeService : Service() {
                     yield()
                 }
                 
-                if (isRunning) {
+                // Al finalizar, guardar los MEJORES resultados acumulados de todas las iteraciones
+                if (isRunning && mejoresResultadosPorMetodo.isNotEmpty()) {
+                    val mejoresOrdenados = mejoresResultadosPorMetodo.values
+                        .sortedByDescending { it.puntuacionTotal }
+                    persistencia.guardarResultados(tipoLoteria, mejoresOrdenados)
+                    
                     progreso = 100
                     ultimoLog = "✅ Completado: $iteraciones iteraciones"
                     updateNotification("✅ $tipoLoteria: Completado", 100)

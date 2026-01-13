@@ -224,6 +224,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val probabilidadTeorica = "1 entre 139.838.160 (≈0.0000000715%)"
         
         val fechaUltimoSorteo = historico.maxByOrNull { it.fecha }?.fecha
+        
+        // IMPORTANTE: Para estrellas, dividir por total de estrellas (2 por sorteo), no por sorteos
+        val totalEstrellas = historico.size * 2
 
         return AnalisisProbabilidad(
             tipoLoteria = TipoLoteria.EUROMILLONES,
@@ -232,7 +235,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             combinacionesSugeridas = combinaciones,
             numerosMasFrequentes = obtenerTopNumeros(frecuenciasNumeros, 10, historico.size),
             numerosMenosFrequentes = obtenerTopNumeros(frecuenciasNumeros, 10, historico.size, menosFrecuentes = true),
-            complementariosMasFrequentes = obtenerTopNumeros(frecuenciasEstrellas, 5, historico.size),
+            complementariosMasFrequentes = obtenerTopNumeros(frecuenciasEstrellas, 5, totalEstrellas),
             probabilidadTeorica = probabilidadTeorica,
             fechaUltimoSorteo = fechaUltimoSorteo
         )
@@ -1495,11 +1498,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val resultados = mutableListOf<ResultadoBacktest>()
         
         for (metodo in MetodoCalculo.values()) {
-            var aciertos0 = 0
-            var aciertos1 = 0  // Última cifra
-            var aciertos2 = 0  // 2 últimas cifras (terminación)
-            var aciertos3 = 0  // 3 últimas cifras
-            var aciertos4 = 0  // 4+ cifras
+            var aciertos0 = 0  // 0 cifras
+            var aciertos1 = 0  // 1 cifra (última)
+            var aciertos2 = 0  // 2 cifras (terminación)
+            var aciertos3 = 0  // 3 cifras
+            var aciertos4 = 0  // 4 cifras
+            var aciertos5 = 0  // 5 cifras (número completo)
             var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
@@ -1509,43 +1513,40 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 if (historicoHastaMomento.size < 3) continue
                 
                 val sorteoReal = historico[i]
-                val numeroReal = sorteoReal.primerPremio.filter { it.isDigit() }.padStart(5, '0')
-                val terminacionReal = numeroReal.takeLast(2).toIntOrNull() ?: 0
-                val ultimaCifraReal = numeroReal.takeLast(1).toIntOrNull() ?: 0
+                val numeroReal = sorteoReal.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
                 val reintegrosReales = sorteoReal.reintegros.toSet()
                 
                 // Generar predicciones según MÉTODO
                 val predicciones = generarPrediccionesNacional(historicoHastaMomento, metodo)
                 
                 for (prediccion in predicciones.take(5)) {
-                    val terminacionPred = prediccion % 100
-                    val ultimaCifraPred = prediccion % 10
+                    val numeroPred = prediccion.toString().padStart(5, '0').takeLast(5)
                     
-                    val aciertosEnPrediccion = when {
-                        prediccion == (numeroReal.toIntOrNull() ?: 0) -> 5  // Número completo (casi imposible)
-                        terminacionPred == terminacionReal -> 2  // Terminación 2 cifras
-                        ultimaCifraPred == ultimaCifraReal -> 1  // Última cifra
-                        else -> 0
-                    }
+                    // Contar cifras coincidentes desde el final
+                    val cifrasCoincidentes = contarCifrasCoincidentes(numeroPred, numeroReal)
                     
+                    // Comprobar reintegro (última cifra de la predicción)
+                    val ultimaCifraPred = numeroPred.last().digitToIntOrNull() ?: -1
                     if (ultimaCifraPred in reintegrosReales) aciertosReintegro++
                     
-                    when (aciertosEnPrediccion) {
+                    when (cifrasCoincidentes) {
                         0 -> aciertos0++
                         1 -> aciertos1++
                         2 -> aciertos2++
                         3 -> aciertos3++
-                        else -> aciertos4++
+                        4 -> aciertos4++
+                        else -> aciertos5++
                     }
                     
-                    if (aciertosEnPrediccion > mejorAcierto) mejorAcierto = aciertosEnPrediccion
-                    totalAciertos += aciertosEnPrediccion
+                    if (cifrasCoincidentes > mejorAcierto) mejorAcierto = cifrasCoincidentes
+                    totalAciertos += cifrasCoincidentes
                 }
             }
             
             val totalCombinaciones = (diasEfectivos * 5).coerceAtLeast(1)
-            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
-                             aciertosReintegro * 5.0) / totalCombinaciones * 100
+            // Puntuación: 1 cifra=2, 2 cifras=15, 3 cifras=100, 4 cifras=500, 5 cifras=2000, reintegro=5
+            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 100.0 + 
+                             aciertos4 * 500.0 + aciertos5 * 2000.0 + aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1555,6 +1556,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertos5 = aciertos5,
                 aciertosReintegro = aciertosReintegro,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,
@@ -1564,6 +1566,27 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         }
         
         return resultados.sortedByDescending { it.puntuacionTotal }
+    }
+    
+    /**
+     * Cuenta cuántas cifras coinciden desde el final entre dos números.
+     * Ej: "12345" y "00045" -> 2 cifras (45)
+     *     "12345" y "12345" -> 5 cifras
+     *     "12345" y "99999" -> 0 cifras
+     */
+    private fun contarCifrasCoincidentes(pred: String, real: String): Int {
+        val predPadded = pred.takeLast(5).padStart(5, '0')
+        val realPadded = real.takeLast(5).padStart(5, '0')
+        
+        var cifras = 0
+        for (i in 4 downTo 0) {
+            if (predPadded[i] == realPadded[i]) {
+                cifras++
+            } else {
+                break  // Si una cifra no coincide, dejar de contar
+            }
+        }
+        return cifras
     }
     
     /**
@@ -1657,11 +1680,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val resultados = mutableListOf<ResultadoBacktest>()
         
         for (metodo in MetodoCalculo.values()) {
-            var aciertos0 = 0
-            var aciertos1 = 0  // Última cifra
-            var aciertos2 = 0  // 2 últimas cifras (terminación)
-            var aciertos3 = 0  // 3 últimas cifras
-            var aciertos4 = 0  // 4+ cifras
+            var aciertos0 = 0  // 0 cifras
+            var aciertos1 = 0  // 1 cifra (última)
+            var aciertos2 = 0  // 2 cifras (terminación)
+            var aciertos3 = 0  // 3 cifras
+            var aciertos4 = 0  // 4 cifras
+            var aciertos5 = 0  // 5 cifras (número completo)
             var aciertosReintegro = 0
             var mejorAcierto = 0
             var totalAciertos = 0
@@ -1671,42 +1695,40 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 if (historicoHastaMomento.size < 3) continue
                 
                 val sorteoReal = historico[i]
-                val gordoReal = sorteoReal.gordo.filter { it.isDigit() }.padStart(5, '0')
-                val terminacionReal = gordoReal.takeLast(2).toIntOrNull() ?: 0
-                val ultimaCifraReal = gordoReal.takeLast(1).toIntOrNull() ?: 0
+                val gordoReal = sorteoReal.gordo.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
                 val reintegrosReales = sorteoReal.reintegros.toSet()
                 
                 // Generar predicciones según MÉTODO
                 val predicciones = generarPrediccionesNavidad(historicoHastaMomento, metodo)
                 
                 for (prediccion in predicciones.take(5)) {
-                    val terminacionPred = prediccion % 100
-                    val ultimaCifraPred = prediccion % 10
+                    val numeroPred = prediccion.toString().padStart(5, '0').takeLast(5)
                     
-                    val aciertosEnPrediccion = when {
-                        terminacionPred == terminacionReal -> 2  // Terminación 2 cifras
-                        ultimaCifraPred == ultimaCifraReal -> 1  // Última cifra
-                        else -> 0
-                    }
+                    // Contar cifras coincidentes desde el final
+                    val cifrasCoincidentes = contarCifrasCoincidentes(numeroPred, gordoReal)
                     
+                    // Comprobar reintegro (última cifra de la predicción)
+                    val ultimaCifraPred = numeroPred.last().digitToIntOrNull() ?: -1
                     if (ultimaCifraPred in reintegrosReales) aciertosReintegro++
                     
-                    when (aciertosEnPrediccion) {
+                    when (cifrasCoincidentes) {
                         0 -> aciertos0++
                         1 -> aciertos1++
                         2 -> aciertos2++
                         3 -> aciertos3++
-                        else -> aciertos4++
+                        4 -> aciertos4++
+                        else -> aciertos5++
                     }
                     
-                    if (aciertosEnPrediccion > mejorAcierto) mejorAcierto = aciertosEnPrediccion
-                    totalAciertos += aciertosEnPrediccion
+                    if (cifrasCoincidentes > mejorAcierto) mejorAcierto = cifrasCoincidentes
+                    totalAciertos += cifrasCoincidentes
                 }
             }
             
             val totalCombinaciones = (diasEfectivos * 5).coerceAtLeast(1)
-            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 50.0 + aciertos4 * 100.0 +
-                             aciertosReintegro * 5.0) / totalCombinaciones * 100
+            // Puntuación: 1 cifra=2, 2 cifras=15, 3 cifras=100, 4 cifras=500, 5 cifras=2000, reintegro=5
+            val puntuacion = (aciertos1 * 2.0 + aciertos2 * 15.0 + aciertos3 * 100.0 + 
+                             aciertos4 * 500.0 + aciertos5 * 2000.0 + aciertosReintegro * 5.0) / totalCombinaciones * 100
             
             resultados.add(ResultadoBacktest(
                 metodo = metodo,
@@ -1716,6 +1738,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 aciertos2 = aciertos2,
                 aciertos3 = aciertos3,
                 aciertos4 = aciertos4,
+                aciertos5 = aciertos5,
                 aciertosReintegro = aciertosReintegro,
                 puntuacionTotal = puntuacion.roundTo(2),
                 mejorAcierto = mejorAcierto,

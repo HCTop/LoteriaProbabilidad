@@ -92,9 +92,39 @@ fun PantallaBacktest(
             val nuevoParaEsta = AprendizajeService.isRunningFor(tipoLoteria.name)
             
             if (servicioParaEsta && !nuevoParaEsta) {
-                addLog("✅ Aprendizaje completado")
+                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                addLog("✅ APRENDIZAJE COMPLETADO")
+                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                
+                // Recargar estado de la IA
                 resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
                 resultados = persistencia.obtenerResultados(tipoLoteria.name)
+                
+                addLog("📈 RESULTADOS DEL APRENDIZAJE:")
+                addLog("   • Nuevo nivel: ${resumenIA.nombreNivel}")
+                addLog("   • Total entrenamientos: ${resumenIA.totalEntrenamientos}")
+                addLog("   • Mejor puntuación: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
+                
+                // Mostrar lo que ha aprendido
+                if (resumenIA.pesosCaracteristicas.isNotEmpty()) {
+                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    addLog("🧠 PESOS APRENDIDOS:")
+                    resumenIA.pesosCaracteristicas.entries
+                        .sortedByDescending { it.value }
+                        .take(5)
+                        .forEach { (nombre, peso) ->
+                            addLog("   • $nombre: ${(peso * 100).toInt()}%")
+                        }
+                }
+                
+                if (resultados.isNotEmpty()) {
+                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    addLog("🏆 MEJORES MÉTODOS:")
+                    resultados.take(3).forEachIndexed { idx, r ->
+                        addLog("   ${idx + 1}. ${r.metodo.displayName}: ${"%.2f".format(r.puntuacionTotal)} pts")
+                    }
+                }
+                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             }
             
             servicioActivo = AprendizajeService.isRunning
@@ -103,9 +133,27 @@ fun PantallaBacktest(
             
             if (servicioParaEsta) {
                 val progreso = AprendizajeService.progreso
-                if (progreso >= ultimoProgreso + 5 || progreso == 100) {
+                val iteracion = AprendizajeService.iteracionActual
+                val total = AprendizajeService.totalIteraciones
+                val mejorPunt = AprendizajeService.mejorPuntuacion
+                
+                // Solo mostrar progreso si:
+                // - Aumentó 5% o más, O
+                // - Es 100% Y aún no lo hemos mostrado
+                val debeLoguear = when {
+                    progreso == 100 && ultimoProgreso == 100 -> false  // Ya mostramos 100%
+                    progreso == 100 -> true  // Primera vez que llegamos a 100%
+                    progreso >= ultimoProgreso + 10 -> true  // Aumentó 10% (menos spam)
+                    else -> false
+                }
+                
+                if (debeLoguear) {
                     ultimoProgreso = progreso
-                    addLog("🔄 $progreso% - It. ${AprendizajeService.iteracionActual}/${AprendizajeService.totalIteraciones}")
+                    if (mejorPunt > 0) {
+                        addLog("🔄 $progreso% - It. $iteracion/$total | Mejor: ${"%.1f".format(mejorPunt)}")
+                    } else {
+                        addLog("🔄 $progreso% - It. $iteracion/$total")
+                    }
                 }
             } else {
                 ultimoProgreso = -1
@@ -199,6 +247,9 @@ fun PantallaBacktest(
                                         Spacer(modifier = Modifier.height(8.dp))
                                         LinearProgressIndicator(progress = AprendizajeService.progreso / 100f, modifier = Modifier.fillMaxWidth())
                                         Text("It. ${AprendizajeService.iteracionActual}/${AprendizajeService.totalIteraciones} (${AprendizajeService.progreso}%)", style = MaterialTheme.typography.bodySmall)
+                                        if (AprendizajeService.mejorPuntuacion > 0) {
+                                            Text("📈 Mejor puntuación: ${"%.2f".format(AprendizajeService.mejorPuntuacion)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                                        }
                                     } else {
                                         Text("⚠️ Aprendizaje activo: ${AprendizajeService.tipoLoteriaActual}", fontWeight = FontWeight.Bold)
                                         Text("Espera o detén el proceso actual", style = MaterialTheme.typography.bodySmall)
@@ -215,10 +266,25 @@ fun PantallaBacktest(
                         } else {
                             Button(
                                 onClick = {
+                                    // Calcular combinaciones totales: 9 métodos x sorteos x iteraciones
+                                    val totalCombinaciones = 9 * diasAtras.toInt() * iteraciones.toInt()
+                                    
                                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                     addLog("🚀 INICIANDO APRENDIZAJE")
-                                    addLog("📊 ${tipoLoteria.displayName} | $tamanoHistorico sorteos")
-                                    addLog("🔄 ${iteraciones.toInt()} iteraciones x ${diasAtras.toInt()} sorteos")
+                                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    addLog("📊 Lotería: ${tipoLoteria.displayName}")
+                                    addLog("📊 Histórico disponible: $tamanoHistorico sorteos")
+                                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    addLog("⚙️ CONFIGURACIÓN:")
+                                    addLog("   • Iteraciones: ${iteraciones.toInt()}")
+                                    addLog("   • Sorteos por iteración: ${diasAtras.toInt()}")
+                                    addLog("   • Métodos de cálculo: 9")
+                                    addLog("   • Combinaciones totales: $totalCombinaciones")
+                                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    addLog("📝 Estado actual de la IA:")
+                                    addLog("   • Nivel: ${resumenIA.nombreNivel}")
+                                    addLog("   • Entrenamientos previos: ${resumenIA.totalEntrenamientos}")
+                                    addLog("   • Mejor puntuación: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
                                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                     
                                     AprendizajeService.startLearning(context, tipoLoteria.name, diasAtras.toInt(), iteraciones.toInt())
@@ -343,7 +409,7 @@ fun PantallaBacktest(
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text("📈 Leyenda de puntuación", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             val leyenda = when (tipoLoteria) {
-                                TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO -> "1 cifra = 2pt • Terminación = 15pt • Reintegro = 5pt"
+                                TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO -> "1 cifra=2pt • 2 cifras=15pt • 3 cifras=100pt • 4 cifras=500pt • 5 cifras=2000pt • Reintegro=5pt"
                                 else -> "1 acierto = 1pt • 2 = 3pt • 3 = 10pt • 4 = 50pt • 5+ = 500pt"
                             }
                             Text(leyenda, fontSize = 11.sp)
@@ -377,12 +443,22 @@ fun ResultadoBacktestCard(resultado: ResultadoBacktest, posicion: Int, tipoLoter
             // Mostrar aciertos con formato según tipo de lotería
             when (tipoLoteria) {
                 TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO -> {
-                    // Loterías de terminaciones
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        AciertoChipConTick("0 cifras", resultado.aciertos0, Color.Gray, false)
-                        AciertoChipConTick("1 cifra", resultado.aciertos1, Color(0xFF9E9E9E), resultado.aciertos1 > 0)
-                        AciertoChipConTick("Terminación", resultado.aciertos2, Color(0xFF4CAF50), resultado.aciertos2 > 0)
-                        AciertoChipConTick("Reintegro", resultado.aciertosReintegro, Color(0xFF2196F3), resultado.aciertosReintegro > 0)
+                    // Loterías de 5 cifras - MOSTRAR TODAS LAS CIFRAS
+                    Column {
+                        // Primera fila: cifras acertadas
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            AciertoChipConTick("0", resultado.aciertos0, Color.Gray, false)
+                            AciertoChipConTick("1", resultado.aciertos1, Color(0xFF9E9E9E), resultado.aciertos1 > 0)
+                            AciertoChipConTick("2", resultado.aciertos2, Color(0xFF8BC34A), resultado.aciertos2 > 0)
+                            AciertoChipConTick("3", resultado.aciertos3, Color(0xFF4CAF50), resultado.aciertos3 > 0)
+                            AciertoChipConTick("4", resultado.aciertos4, Color(0xFFFF9800), resultado.aciertos4 > 0)
+                            AciertoChipConTick("5", resultado.aciertos5, Color(0xFFE91E63), resultado.aciertos5 > 0)
+                        }
+                        // Segunda fila: reintegro
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            AciertoChipConTick("🔄 Reintegro", resultado.aciertosReintegro, Color(0xFF2196F3), resultado.aciertosReintegro > 0)
+                        }
                     }
                 }
                 TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> {
