@@ -78,6 +78,8 @@ fun PantallaBacktest(
     // LOGS
     var logs by remember { mutableStateOf(persistencia.obtenerLogs(tipoLoteria.name)) }
     val logListState = rememberLazyListState()
+    var ultimoMetodoLogueado by remember { mutableStateOf("") }
+    var ultimaCombLogueada by remember { mutableStateOf(0) }
     
     fun addLog(mensaje: String) {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -136,23 +138,37 @@ fun PantallaBacktest(
                 val iteracion = AprendizajeService.iteracionActual
                 val total = AprendizajeService.totalIteraciones
                 val mejorPunt = AprendizajeService.mejorPuntuacion
+                val metodoActual = AprendizajeService.metodoActual
+                val combActual = AprendizajeService.combinacionActual
+                val combTotal = AprendizajeService.totalCombinaciones
                 
-                // Solo mostrar progreso si:
-                // - Aumentó 5% o más, O
-                // - Es 100% Y aún no lo hemos mostrado
-                val debeLoguear = when {
-                    progreso == 100 && ultimoProgreso == 100 -> false  // Ya mostramos 100%
-                    progreso == 100 -> true  // Primera vez que llegamos a 100%
-                    progreso >= ultimoProgreso + 10 -> true  // Aumentó 10% (menos spam)
+                // Loguear progreso general cada 10%
+                val debeLoguearProgreso = when {
+                    progreso == 100 && ultimoProgreso == 100 -> false
+                    progreso == 100 -> true
+                    progreso >= ultimoProgreso + 10 -> true
                     else -> false
                 }
                 
-                if (debeLoguear) {
+                if (debeLoguearProgreso) {
                     ultimoProgreso = progreso
+                    val logMsg = StringBuilder("🔄 $progreso% - It. $iteracion/$total")
                     if (mejorPunt > 0) {
-                        addLog("🔄 $progreso% - It. $iteracion/$total | Mejor: ${"%.1f".format(mejorPunt)}")
-                    } else {
-                        addLog("🔄 $progreso% - It. $iteracion/$total")
+                        logMsg.append(" | Mejor: ${"%.1f".format(mejorPunt)}")
+                    }
+                    addLog(logMsg.toString())
+                }
+                
+                // Mostrar info de combinaciones si hay datos
+                if (metodoActual.isNotEmpty() && combTotal > 0) {
+                    // Loguear cuando cambie el método o cada 250 combinaciones
+                    val cambioMetodo = metodoActual != ultimoMetodoLogueado
+                    val avance250 = combActual >= ultimaCombLogueada + 250
+                    
+                    if (cambioMetodo || avance250) {
+                        ultimoMetodoLogueado = metodoActual
+                        ultimaCombLogueada = combActual
+                        addLog("   📊 $metodoActual | Comb: $combActual/$combTotal")
                     }
                 }
             } else {
@@ -286,6 +302,11 @@ fun PantallaBacktest(
                                     addLog("   • Entrenamientos previos: ${resumenIA.totalEntrenamientos}")
                                     addLog("   • Mejor puntuación: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
                                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    
+                                    // Resetear contadores de log
+                                    ultimoProgreso = -1
+                                    ultimoMetodoLogueado = ""
+                                    ultimaCombLogueada = 0
                                     
                                     AprendizajeService.startLearning(context, tipoLoteria.name, diasAtras.toInt(), iteraciones.toInt())
                                     addLog("✅ Servicio iniciado - Puedes cerrar la app")

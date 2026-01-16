@@ -1,5 +1,7 @@
 package com.loteria.probabilidad.ui.screens
 
+import android.app.Activity
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +42,9 @@ fun PantallaSeleccionLoteria(
     
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
+    
+    // Usuario de GitHub hardcodeado
+    val githubUser = "HCTop"
     
     Scaffold(
         topBar = {
@@ -198,10 +203,9 @@ fun PantallaSeleccionLoteria(
                         onClick = {
                             scope.launch {
                                 descargando = true
-                                mensajeDescarga = "🔄 Conectando..."
+                                mensajeDescarga = "🔄 Conectando a GitHub (HCTop)..."
                                 
-                                // URL base de GitHub - CAMBIAR POR TU USUARIO
-                                val baseUrl = "https://raw.githubusercontent.com/TU_USUARIO/LoteriaProbabilidad/main/app/src/main/res/raw"
+                                val baseUrl = "https://raw.githubusercontent.com/HCTop/LoteriaProbabilidad/master/app/src/main/res/raw"
                                 
                                 val csvFiles = listOf(
                                     "historico_primitiva.csv",
@@ -214,50 +218,76 @@ fun PantallaSeleccionLoteria(
                                 )
                                 
                                 var descargados = 0
+                                var descargadosGitHub = 0
                                 var totalLineas = 0
                                 var ultimaFecha = ""
                                 var primeraFecha = ""
                                 var usandoLocal = false
                                 
                                 withContext(Dispatchers.IO) {
+                                    var errores = mutableListOf<String>()
+                                    
                                     for (csvFile in csvFiles) {
                                         withContext(Dispatchers.Main) {
                                             mensajeDescarga = "⬇️ $csvFile..."
                                         }
                                         
                                         var content: String? = null
+                                        var desdeGitHub = false
                                         
                                         // Intentar descargar desde GitHub
                                         try {
-                                            val url = URL("$baseUrl/$csvFile")
-                                            val connection = url.openConnection()
-                                            connection.connectTimeout = 10000
-                                            connection.readTimeout = 30000
+                                            val urlStr = "$baseUrl/$csvFile"
+                                            val url = URL(urlStr)
+                                            val connection = url.openConnection() as java.net.HttpURLConnection
+                                            connection.connectTimeout = 15000
+                                            connection.readTimeout = 60000
                                             connection.setRequestProperty("User-Agent", "LoteriaProbabilidad-App")
+                                            connection.setRequestProperty("Accept", "text/plain,text/csv,*/*")
                                             
-                                            val inputStream = connection.getInputStream()
-                                            content = inputStream.bufferedReader().readText()
-                                            inputStream.close()
-                                            
-                                            // Guardar en archivos internos
-                                            val outputFile = File(context.filesDir, csvFile)
-                                            outputFile.writeText(content)
+                                            val responseCode = connection.responseCode
+                                            if (responseCode == 200) {
+                                                val inputStream = connection.inputStream
+                                                content = inputStream.bufferedReader().readText()
+                                                inputStream.close()
+                                                desdeGitHub = true
+                                                
+                                                // Guardar en archivos internos
+                                                val outputFile = File(context.filesDir, csvFile)
+                                                outputFile.writeText(content)
+                                            } else {
+                                                errores.add("$csvFile: HTTP $responseCode")
+                                            }
+                                            connection.disconnect()
                                             
                                         } catch (e: Exception) {
-                                            // Fallback a recurso local
-                                            usandoLocal = true
-                                            try {
-                                                val resourceName = csvFile.replace(".csv", "")
-                                                val resId = context.resources.getIdentifier(
-                                                    resourceName, "raw", context.packageName
-                                                )
-                                                if (resId != 0) {
-                                                    val localStream = context.resources.openRawResource(resId)
-                                                    content = localStream.bufferedReader().readText()
-                                                    localStream.close()
+                                            errores.add("$csvFile: ${e.message?.take(50) ?: "Error"}")
+                                            
+                                            // Fallback: Intentar leer archivo ya descargado previamente
+                                            val existingFile = File(context.filesDir, csvFile)
+                                            if (existingFile.exists()) {
+                                                try {
+                                                    content = existingFile.readText()
+                                                    desdeGitHub = false  // Ya estaba descargado
+                                                } catch (_: Exception) {}
+                                            }
+                                            
+                                            // Fallback final: recurso local
+                                            if (content == null) {
+                                                usandoLocal = true
+                                                try {
+                                                    val resourceName = csvFile.replace(".csv", "")
+                                                    val resId = context.resources.getIdentifier(
+                                                        resourceName, "raw", context.packageName
+                                                    )
+                                                    if (resId != 0) {
+                                                        val localStream = context.resources.openRawResource(resId)
+                                                        content = localStream.bufferedReader().readText()
+                                                        localStream.close()
+                                                    }
+                                                } catch (localError: Exception) {
+                                                    // Ignorar
                                                 }
-                                            } catch (localError: Exception) {
-                                                // Ignorar
                                             }
                                         }
                                         
@@ -266,6 +296,7 @@ fun PantallaSeleccionLoteria(
                                             val lines = txt.lines()
                                             totalLineas += lines.size - 1
                                             descargados++
+                                            if (desdeGitHub) descargadosGitHub++
                                             
                                             // Extraer fechas de Primitiva
                                             if (csvFile == "historico_primitiva.csv" && lines.size > 1) {
@@ -276,13 +307,18 @@ fun PantallaSeleccionLoteria(
                                     }
                                     
                                     withContext(Dispatchers.Main) {
-                                        val fuente = if (usandoLocal) " (local)" else " (GitHub)"
+                                        val fuente = when {
+                                            descargadosGitHub == csvFiles.size -> " (GitHub ✓)"
+                                            descargadosGitHub > 0 -> " (GitHub parcial)"
+                                            usandoLocal -> " (local)"
+                                            else -> ""
+                                        }
                                         mensajeDescarga = if (descargados == csvFiles.size) {
                                             "✅ $descargados archivos$fuente\n📊 $totalLineas sorteos\n📅 $primeraFecha → $ultimaFecha"
                                         } else if (descargados > 0) {
-                                            "⚠️ $descargados/${csvFiles.size} archivos\n📊 $totalLineas sorteos"
+                                            "⚠️ $descargados/${csvFiles.size} archivos$fuente\n📊 $totalLineas sorteos"
                                         } else {
-                                            "❌ Sin conexión\nComprueba tu red"
+                                            "❌ Sin conexión\n${errores.take(2).joinToString("\n")}"
                                         }
                                     }
                                 }
@@ -308,6 +344,29 @@ fun PantallaSeleccionLoteria(
                         }
                     }
                 }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Botón de cerrar sesión
+            TextButton(
+                onClick = {
+                    // Cerrar sesión
+                    val prefs = context.getSharedPreferences("loteria_auth", android.content.Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("autenticado", false).apply()
+                    
+                    // Reiniciar la actividad para volver al login
+                    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    (context as? Activity)?.finish()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "🔒 Cerrar sesión",
+                    color = MaterialTheme.colorScheme.error
+                )
             }
             
             Spacer(modifier = Modifier.height(16.dp))

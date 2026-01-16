@@ -46,6 +46,11 @@ class AprendizajeService : Service() {
         @Volatile var mejorPuntuacion = 0.0
         @Volatile var ultimaActualizacion = System.currentTimeMillis()
         
+        // Contadores de combinaciones
+        @Volatile var combinacionActual = 0
+        @Volatile var totalCombinaciones = 0
+        @Volatile var metodoActual = ""
+        
         fun isRunningFor(tipoLoteria: String): Boolean {
             return isRunning && tipoLoteriaActual == tipoLoteria
         }
@@ -84,6 +89,11 @@ class AprendizajeService : Service() {
             totalIteraciones = iteraciones
             entrenamientosCompletados = 0
             ultimoLog = ""
+            
+            // Resetear contadores de combinaciones
+            combinacionActual = 0
+            totalCombinaciones = 9 * sorteos * iteraciones  // 9 métodos x sorteos x iteraciones
+            metodoActual = ""
             
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
@@ -151,6 +161,15 @@ class AprendizajeService : Service() {
                 val memoriaIA = MemoriaIA(this@AprendizajeService)
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
                 val persistencia = com.loteria.probabilidad.domain.ml.BacktestPersistencia(this@AprendizajeService)
+                
+                // Callback para actualizar progreso de combinaciones
+                val combsPorIteracion = sorteos * 9 * 5  // sorteos * métodos * combinaciones
+                calculador.onProgresoBacktest = { metodo, comb, total ->
+                    metodoActual = metodo
+                    // Hacer acumulativo: combinaciones de iteraciones anteriores + actual
+                    combinacionActual = ((iteracionActual - 1).coerceAtLeast(0)) * combsPorIteracion + comb
+                    totalCombinaciones = combsPorIteracion * iteraciones
+                }
                 
                 updateNotification("Cargando $tipoLoteria...", 0)
                 

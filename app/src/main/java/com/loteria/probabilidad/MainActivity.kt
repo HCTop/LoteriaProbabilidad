@@ -1,5 +1,6 @@
 package com.loteria.probabilidad
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,10 +9,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.loteria.probabilidad.service.AprendizajeService
 import com.loteria.probabilidad.ui.LoteriaProbabilidadApp
+import com.loteria.probabilidad.ui.screens.PantallaLogin
 import com.loteria.probabilidad.ui.theme.LoteriaProbabilidadTheme
 
 /**
@@ -23,6 +27,9 @@ class MainActivity : ComponentActivity() {
     private val navegarABacktesting = mutableStateOf(false)
     private val tipoLoteriaBacktesting = mutableStateOf<String?>(null)
     
+    // Estado de autenticación
+    private var estaAutenticado by mutableStateOf(false)
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -30,20 +37,32 @@ class MainActivity : ComponentActivity() {
         // Verificar si viene de la notificación
         handleIntent(intent)
         
+        // Verificar autenticación previa
+        val prefs = getSharedPreferences("loteria_auth", Context.MODE_PRIVATE)
+        estaAutenticado = prefs.getBoolean("autenticado", false)
+        
         setContent {
             LoteriaProbabilidadTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    LoteriaProbabilidadApp(
-                        navegarABacktesting = navegarABacktesting.value,
-                        tipoLoteriaBacktesting = tipoLoteriaBacktesting.value,
-                        onBacktestingNavegado = { 
-                            navegarABacktesting.value = false
-                            tipoLoteriaBacktesting.value = null
-                        }
-                    )
+                    if (estaAutenticado) {
+                        LoteriaProbabilidadApp(
+                            navegarABacktesting = navegarABacktesting.value,
+                            tipoLoteriaBacktesting = tipoLoteriaBacktesting.value,
+                            onBacktestingNavegado = { 
+                                navegarABacktesting.value = false
+                                tipoLoteriaBacktesting.value = null
+                            }
+                        )
+                    } else {
+                        PantallaLogin(
+                            onLoginExitoso = {
+                                estaAutenticado = true
+                            }
+                        )
+                    }
                 }
             }
         }
