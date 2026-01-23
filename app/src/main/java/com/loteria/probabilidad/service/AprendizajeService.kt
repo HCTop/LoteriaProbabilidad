@@ -51,6 +51,29 @@ class AprendizajeService : Service() {
         @Volatile var totalCombinaciones = 0
         @Volatile var metodoActual = ""
         
+        // Lista de últimos métodos procesados (para el log)
+        val metodosRecientes = mutableListOf<String>()
+        
+        fun agregarMetodoProcesado(metodo: String) {
+            synchronized(metodosRecientes) {
+                if (metodosRecientes.lastOrNull() != metodo) {
+                    metodosRecientes.add(metodo)
+                    // Mantener solo los últimos 20
+                    while (metodosRecientes.size > 20) {
+                        metodosRecientes.removeAt(0)
+                    }
+                }
+            }
+        }
+        
+        fun obtenerMetodosRecientes(): List<String> {
+            synchronized(metodosRecientes) {
+                val copia = metodosRecientes.toList()
+                metodosRecientes.clear()
+                return copia
+            }
+        }
+        
         fun isRunningFor(tipoLoteria: String): Boolean {
             return isRunning && tipoLoteriaActual == tipoLoteria
         }
@@ -94,6 +117,9 @@ class AprendizajeService : Service() {
             combinacionActual = 0
             totalCombinaciones = 9 * sorteos * iteraciones  // 9 métodos x sorteos x iteraciones
             metodoActual = ""
+            synchronized(metodosRecientes) {
+                metodosRecientes.clear()
+            }
             
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
@@ -166,6 +192,7 @@ class AprendizajeService : Service() {
                 val combsPorIteracion = sorteos * 9 * 5  // sorteos * métodos * combinaciones
                 calculador.onProgresoBacktest = { metodo, comb, total ->
                     metodoActual = metodo
+                    agregarMetodoProcesado(metodo) // Registrar para el log
                     // Hacer acumulativo: combinaciones de iteraciones anteriores + actual
                     combinacionActual = ((iteracionActual - 1).coerceAtLeast(0)) * combsPorIteracion + comb
                     totalCombinaciones = combsPorIteracion * iteraciones

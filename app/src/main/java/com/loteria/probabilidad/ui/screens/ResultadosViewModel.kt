@@ -165,7 +165,7 @@ class ResultadosViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val dataSource = LoteriaLocalDataSource(context)
             val repository = LoteriaRepository(dataSource)
-            val calculador = CalculadorProbabilidad()
+            val calculador = CalculadorProbabilidad(context)
             val useCase = ObtenerCombinacionesUseCase(repository, calculador)
             
             return ResultadosViewModel(useCase, repository) as T

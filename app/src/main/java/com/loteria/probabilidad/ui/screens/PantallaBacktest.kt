@@ -56,9 +56,12 @@ fun PantallaBacktest(
         TipoLoteria.NINO -> historicoNino.size
     })
     
+    // Estado de carga
+    val estaCargando = tamanoHistorico == 0
+    
     // Cálculo seguro para slider
     val minDias = 2
-    val maxDias = if (tamanoHistorico < 5) 2 else maxOf(minDias, minOf(tamanoHistorico - 2, 500))
+    val maxDias = if (tamanoHistorico < 5) 100 else maxOf(minDias, minOf(tamanoHistorico - 2, 500))
     val valorInicial = maxOf(minDias.toFloat(), minOf((maxDias * 0.2f), maxDias.toFloat()))
     
     // Estados
@@ -66,6 +69,7 @@ fun PantallaBacktest(
     var diasAtras by remember { mutableStateOf(valorInicial) }
     var iteraciones by remember { mutableStateOf(50f) }
     var resumenIA by remember { mutableStateOf(memoriaIA.obtenerResumenIA(tipoLoteria.name)) }
+    var tamanoPool by remember { mutableStateOf(memoriaIA.obtenerTamanoPool().toFloat()) }
     
     // Estado del servicio
     var servicioActivo by remember { mutableStateOf(AprendizajeService.isRunning) }
@@ -103,29 +107,36 @@ fun PantallaBacktest(
                 resultados = persistencia.obtenerResultados(tipoLoteria.name)
                 
                 addLog("📈 RESULTADOS DEL APRENDIZAJE:")
-                addLog("   • Nuevo nivel: ${resumenIA.nombreNivel}")
-                addLog("   • Total entrenamientos: ${resumenIA.totalEntrenamientos}")
-                addLog("   • Mejor puntuación: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
+                addLog("   • Nivel: ${resumenIA.nombreNivel}")
+                addLog("   • Entrenamientos acumulados: ${resumenIA.totalEntrenamientos}")
+                addLog("   • Mejor puntuación histórica: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
                 
-                // Mostrar lo que ha aprendido
+                // Mostrar lo que ha aprendido con explicación
                 if (resumenIA.pesosCaracteristicas.isNotEmpty()) {
                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    addLog("🧠 PESOS APRENDIDOS:")
+                    addLog("🧠 PESOS APRENDIDOS (qué prioriza la IA):")
                     resumenIA.pesosCaracteristicas.entries
                         .sortedByDescending { it.value }
                         .take(5)
                         .forEach { (nombre, peso) ->
-                            addLog("   • $nombre: ${(peso * 100).toInt()}%")
+                            val porcentaje = (peso * 100).toInt()
+                            val barra = "█".repeat((porcentaje / 10).coerceIn(1, 10))
+                            addLog("   $barra $nombre: $porcentaje%")
                         }
+                    addLog("   (Los pesos se usan en predicciones futuras)")
                 }
                 
                 if (resultados.isNotEmpty()) {
                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    addLog("🏆 MEJORES MÉTODOS:")
+                    addLog("🏆 RANKING DE MÉTODOS:")
                     resultados.take(3).forEachIndexed { idx, r ->
-                        addLog("   ${idx + 1}. ${r.metodo.displayName}: ${"%.2f".format(r.puntuacionTotal)} pts")
+                        val emoji = when(idx) { 0 -> "🥇"; 1 -> "🥈"; else -> "🥉" }
+                        addLog("   $emoji ${r.metodo.displayName}: ${"%.2f".format(r.puntuacionTotal)} pts")
                     }
                 }
+                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                addLog("💡 Las combinaciones sugeridas ahora")
+                addLog("   usarán estos pesos aprendidos")
                 addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             }
             
@@ -159,14 +170,18 @@ fun PantallaBacktest(
                     addLog(logMsg.toString())
                 }
                 
-                // Mostrar info de combinaciones si hay datos
-                if (metodoActual.isNotEmpty() && combTotal > 0) {
-                    // Loguear cuando cambie el método o cada 250 combinaciones
-                    val cambioMetodo = metodoActual != ultimoMetodoLogueado
-                    val avance250 = combActual >= ultimaCombLogueada + 250
-                    
-                    if (cambioMetodo || avance250) {
-                        ultimoMetodoLogueado = metodoActual
+                // Mostrar TODOS los métodos procesados desde la última lectura
+                val metodosRecientes = AprendizajeService.obtenerMetodosRecientes()
+                if (metodosRecientes.isNotEmpty()) {
+                    metodosRecientes.forEach { metodo ->
+                        addLog("   📊 $metodo | Comb: $combActual/$combTotal")
+                    }
+                    ultimoMetodoLogueado = metodosRecientes.last()
+                    ultimaCombLogueada = combActual
+                } else if (metodoActual.isNotEmpty() && combTotal > 0) {
+                    // Fallback: si no hay métodos recientes pero hay progreso
+                    val avance500 = combActual >= ultimaCombLogueada + 500
+                    if (avance500) {
                         ultimaCombLogueada = combActual
                         addLog("   📊 $metodoActual | Comb: $combActual/$combTotal")
                     }
@@ -219,23 +234,48 @@ fun PantallaBacktest(
                             Text("${diasAtras.toInt()}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
                         }
                         
-                        if (maxDias > minDias) {
-                            Slider(value = diasAtras, onValueChange = { diasAtras = it }, valueRange = minDias.toFloat()..maxDias.toFloat(), steps = ((maxDias - minDias) / 5).coerceAtLeast(0), modifier = Modifier.fillMaxWidth())
+                        if (estaCargando) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("⏳ Cargando histórico...", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+                            }
+                        } else if (maxDias > minDias) {
+                            Slider(value = diasAtras, onValueChange = { diasAtras = it }, valueRange = minDias.toFloat()..maxDias.toFloat(), steps = ((maxDias - minDias) / 10).coerceAtLeast(0), modifier = Modifier.fillMaxWidth())
+                            Text("📈 Histórico disponible: $tamanoHistorico sorteos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else {
-                            Text("⚠️ Datos insuficientes", color = Color(0xFFFF6600), style = MaterialTheme.typography.bodySmall)
+                            Text("⚠️ Datos insuficientes (mínimo 5 sorteos)", color = Color(0xFFFF6600), style = MaterialTheme.typography.bodySmall)
                         }
                         
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         
-                        // Iteraciones
+                        // Iteraciones con opciones predefinidas
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("🧠 Iteraciones:")
                             Text("${iteraciones.toInt()}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.secondary)
                         }
                         
-                        Slider(value = iteraciones, onValueChange = { iteraciones = it }, valueRange = 10f..300f, steps = 28, modifier = Modifier.fillMaxWidth())
+                        // Botones de selección rápida
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf(10, 25, 50, 100, 200, 500).forEach { valor ->
+                                FilterChip(
+                                    selected = iteraciones.toInt() == valor,
+                                    onClick = { iteraciones = valor.toFloat() },
+                                    label = { Text("$valor", fontSize = 12.sp) },
+                                    modifier = Modifier.padding(2.dp)
+                                )
+                            }
+                        }
                         
-                        Text("Cada iteración ejecuta backtesting + aprendizaje", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = iteraciones, onValueChange = { iteraciones = it }, valueRange = 10f..1000f, steps = 98, modifier = Modifier.fillMaxWidth())
+                        
+                        // Explicación mejorada
+                        Text(
+                            "💡 Más sorteos = mejor análisis estadístico\n" +
+                            "💡 Más iteraciones = más aprendizaje de la IA",
+                            style = MaterialTheme.typography.bodySmall, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         
                         Spacer(modifier = Modifier.height(16.dp))
                         
@@ -264,7 +304,7 @@ fun PantallaBacktest(
                                         LinearProgressIndicator(progress = AprendizajeService.progreso / 100f, modifier = Modifier.fillMaxWidth())
                                         Text("It. ${AprendizajeService.iteracionActual}/${AprendizajeService.totalIteraciones} (${AprendizajeService.progreso}%)", style = MaterialTheme.typography.bodySmall)
                                         if (AprendizajeService.mejorPuntuacion > 0) {
-                                            Text("📈 Mejor puntuación: ${"%.2f".format(AprendizajeService.mejorPuntuacion)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                                            Text("📈 Puntuación actual: ${"%.2f".format(AprendizajeService.mejorPuntuacion)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
                                         }
                                     } else {
                                         Text("⚠️ Aprendizaje activo: ${AprendizajeService.tipoLoteriaActual}", fontWeight = FontWeight.Bold)
@@ -312,7 +352,7 @@ fun PantallaBacktest(
                                     addLog("✅ Servicio iniciado - Puedes cerrar la app")
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = maxDias > minDias
+                                enabled = !estaCargando && maxDias > minDias && tamanoHistorico >= 5
                             ) {
                                 Icon(Icons.Default.PlayArrow, null)
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -346,7 +386,7 @@ fun PantallaBacktest(
                                 Text("${resumenIA.totalEntrenamientos}", fontWeight = FontWeight.Bold)
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Mejor punt.", fontSize = 10.sp, color = Color.Gray)
+                                Text("Mejor hist.", fontSize = 10.sp, color = Color.Gray)
                                 Text("${"%.1f".format(resumenIA.mejorPuntuacion)}", fontWeight = FontWeight.Bold)
                             }
                         }
@@ -362,6 +402,61 @@ fun PantallaBacktest(
                                 }
                             }
                         }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Divider(color = Color.Gray.copy(alpha = 0.3f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // Configuración del tamaño del pool
+                        Text("🎯 Selectividad del pool", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            "Cuántos números top considerar de cada categoría",
+                            fontSize = 10.sp,
+                            color = Color.Gray
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Pool: ${tamanoPool.toInt()} números", fontSize = 12.sp)
+                            Text(
+                                when {
+                                    tamanoPool <= 8 -> "Muy selectivo"
+                                    tamanoPool <= 12 -> "Selectivo"
+                                    tamanoPool <= 16 -> "Equilibrado"
+                                    else -> "Amplio"
+                                },
+                                fontSize = 10.sp,
+                                color = when {
+                                    tamanoPool <= 8 -> Color(0xFFFF9800)
+                                    tamanoPool <= 12 -> Color(0xFF4CAF50)
+                                    tamanoPool <= 16 -> Color(0xFF2196F3)
+                                    else -> Color.Gray
+                                }
+                            )
+                        }
+                        
+                        Slider(
+                            value = tamanoPool,
+                            onValueChange = { tamanoPool = it },
+                            onValueChangeFinished = { 
+                                memoriaIA.guardarTamanoPool(tamanoPool.toInt())
+                                addLog("⚙️ Pool cambiado a ${tamanoPool.toInt()} números")
+                            },
+                            valueRange = 5f..20f,
+                            steps = 14,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Text(
+                            "• 5-8: Solo los mejores números de cada categoría\n" +
+                            "• 10-12: Balance recomendado\n" +
+                            "• 15-20: Más variedad, menos selectivo",
+                            fontSize = 9.sp,
+                            color = Color.Gray
+                        )
                         
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(onClick = { memoriaIA.reiniciarMemoria(tipoLoteria.name); resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name); addLog("🗑️ Memoria reseteada") }, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error), modifier = Modifier.fillMaxWidth()) {

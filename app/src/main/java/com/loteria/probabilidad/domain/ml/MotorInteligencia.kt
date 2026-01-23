@@ -47,61 +47,189 @@ class MotorInteligencia(private val context: Context? = null) {
             return generarHibridoSimple(historico, maxNumero, cantidadNumeros, numCombinaciones)
         }
         
-        contribuciones.clear()
+        // Semilla para variación en la selección dentro de cada pool
+        val semilla = System.nanoTime()
+        val rnd = Random(semilla)
+        
         val car = extraerCaracteristicas(historico, maxNumero, tipoLoteria)
-        var poblacion = crearPoblacionInicial(car, maxNumero, cantidadNumeros)
-        
-        poblacion.forEach { evaluarFitness(it, car) }
-        
-        repeat(config.generaciones) { gen ->
-            poblacion = evolucionarGeneracion(poblacion, car, maxNumero, cantidadNumeros)
-        }
-        
         val nombreNivel = memoria?.obtenerNombreNivel(tipoLoteria) ?: "🌱 Novato"
-        val entrenamientos = memoria?.obtenerTotalEntrenamientos(tipoLoteria) ?: 0
+        val totalEntrenamientos = memoria?.obtenerTotalEntrenamientos(tipoLoteria) ?: 0
         
-        // Añadir VARIACIÓN al fitness para que cada regeneración sea diferente
-        // Esto evita que siempre salgan las mismas combinaciones "óptimas"
-        val variacionFactor = 0.15 // 15% de variación aleatoria
-        poblacion.forEach { ind ->
-            val variacion = (Random.nextDouble() - 0.5) * 2 * variacionFactor * ind.fitness
-            ind.fitness = (ind.fitness + variacion).coerceAtLeast(0.0)
-        }
+        // ═══════════════════════════════════════════════════════════════════
+        // OBTENER PESOS APRENDIDOS
+        // ═══════════════════════════════════════════════════════════════════
+        val pesoGap = pesosCaracteristicas["gap"] ?: 0.20
+        val pesoFrec = pesosCaracteristicas["frecuencia"] ?: 0.20
+        val pesoTend = pesosCaracteristicas["tendencia"] ?: 0.20
+        val pesoBal = pesosCaracteristicas["balance"] ?: 0.20
+        val pesoPatrones = pesosCaracteristicas["patrones"] ?: 0.10
         
-        // Seleccionar combinaciones DIVERSAS (no repetir números idénticos)
-        val ordenadas = poblacion.sortedByDescending { it.fitness }
-        val seleccionadas = mutableListOf<Individuo>()
+        // Normalizar pesos para que sumen 1.0
+        val sumaPesos = pesoGap + pesoFrec + pesoTend + pesoBal + pesoPatrones
+        val pGap = pesoGap / sumaPesos
+        val pFrec = pesoFrec / sumaPesos
+        val pTend = pesoTend / sumaPesos
+        val pBal = pesoBal / sumaPesos
+        val pPatrones = pesoPatrones / sumaPesos
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // CREAR POOLS DE NÚMEROS SEGÚN CADA CARACTERÍSTICA
+        // El tamaño del pool determina cuán "selectivo" es el algoritmo
+        // Pool pequeño (5-8) = muy selectivo, Pool grande (15-20) = más variado
+        // ═══════════════════════════════════════════════════════════════════
+        val tamPool = config.tamanoPool.coerceIn(5, 25)
+        
+        // Pool de números con mayor GAP (más tiempo sin salir)
+        val poolGap = car.gaps.entries
+            .sortedByDescending { it.value }
+            .take(tamPool)
+            .map { it.key }
+        
+        // Pool de números más FRECUENTES
+        val poolFrec = car.frecuencias.entries
+            .sortedByDescending { it.value }
+            .take(tamPool)
+            .map { it.key }
+        
+        // Pool de números con mejor TENDENCIA reciente
+        val poolTend = car.tendencia.entries
+            .sortedByDescending { it.value }
+            .take(tamPool)
+            .map { it.key }
+        
+        // Pool de números para BALANCE (mezcla de altos y bajos)
+        val mitad = maxNumero / 2
+        val poolBalBajos = (1..mitad).toList()
+        val poolBalAltos = ((mitad + 1)..maxNumero).toList()
+        
+        // Pool de números con PATRONES exitosos (de la memoria)
+        val poolPatrones = car.numerosExitosos.entries
+            .sortedByDescending { it.value }
+            .take(tamPool)
+            .map { it.key }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // CALCULAR CUÁNTOS NÚMEROS DE CADA POOL SEGÚN LOS PESOS
+        // Ejemplo: Si Gap=30%, Frec=25%, Tend=20%, Bal=15%, Pat=10%
+        // Para 6 números: Gap=2, Frec=1-2, Tend=1, Bal=1, Pat=0-1
+        // ═══════════════════════════════════════════════════════════════════
+        
+        val combinacionesGeneradas = mutableListOf<List<Int>>()
         val combinacionesVistas = mutableSetOf<Set<Int>>()
         
-        for (ind in ordenadas) {
-            val numSet = ind.genes.toSet()
-            // Solo añadir si es suficientemente diferente (al menos 2 números distintos)
+        var intentos = 0
+        while (combinacionesGeneradas.size < numCombinaciones && intentos < 200) {
+            intentos++
+            
+            // Calcular cuántos de cada tipo (con pequeña variación)
+            val variacion = rnd.nextDouble() * 0.1 - 0.05  // ±5% variación
+            
+            var numGap = ((pGap + variacion) * cantidadNumeros).roundToInt().coerceIn(0, cantidadNumeros)
+            var numFrec = ((pFrec + variacion) * cantidadNumeros).roundToInt().coerceIn(0, cantidadNumeros - numGap)
+            var numTend = ((pTend + variacion) * cantidadNumeros).roundToInt().coerceIn(0, cantidadNumeros - numGap - numFrec)
+            var numBal = ((pBal + variacion) * cantidadNumeros).roundToInt().coerceIn(0, cantidadNumeros - numGap - numFrec - numTend)
+            var numPat = cantidadNumeros - numGap - numFrec - numTend - numBal
+            
+            // Asegurar que sumamos exactamente cantidadNumeros
+            val total = numGap + numFrec + numTend + numBal + numPat
+            if (total < cantidadNumeros) {
+                // Añadir al de mayor peso
+                when {
+                    pGap >= maxOf(pFrec, pTend, pBal, pPatrones) -> numGap += (cantidadNumeros - total)
+                    pFrec >= maxOf(pTend, pBal, pPatrones) -> numFrec += (cantidadNumeros - total)
+                    pTend >= maxOf(pBal, pPatrones) -> numTend += (cantidadNumeros - total)
+                    pBal >= pPatrones -> numBal += (cantidadNumeros - total)
+                    else -> numPat += (cantidadNumeros - total)
+                }
+            } else if (total > cantidadNumeros) {
+                // Quitar del de menor peso
+                val exceso = total - cantidadNumeros
+                when {
+                    numPat >= exceso -> numPat -= exceso
+                    numBal >= exceso -> numBal -= exceso
+                    numTend >= exceso -> numTend -= exceso
+                    numFrec >= exceso -> numFrec -= exceso
+                    else -> numGap -= exceso
+                }
+            }
+            
+            // ═══════════════════════════════════════════════════════════════
+            // SELECCIONAR NÚMEROS DE CADA POOL (shuffled para variación)
+            // ═══════════════════════════════════════════════════════════════
+            val numerosSeleccionados = mutableSetOf<Int>()
+            
+            // Del pool de GAP
+            poolGap.shuffled(rnd)
+                .filter { it !in numerosSeleccionados }
+                .take(numGap)
+                .forEach { numerosSeleccionados.add(it) }
+            
+            // Del pool de FRECUENCIA
+            poolFrec.shuffled(rnd)
+                .filter { it !in numerosSeleccionados }
+                .take(numFrec)
+                .forEach { numerosSeleccionados.add(it) }
+            
+            // Del pool de TENDENCIA
+            poolTend.shuffled(rnd)
+                .filter { it !in numerosSeleccionados }
+                .take(numTend)
+                .forEach { numerosSeleccionados.add(it) }
+            
+            // Del pool de BALANCE (alternando bajos y altos)
+            val bajos = poolBalBajos.shuffled(rnd).filter { it !in numerosSeleccionados }
+            val altos = poolBalAltos.shuffled(rnd).filter { it !in numerosSeleccionados }
+            repeat(numBal) { i ->
+                val num = if (i % 2 == 0 && bajos.size > i/2) bajos[i/2]
+                         else if (altos.size > i/2) altos[i/2]
+                         else (1..maxNumero).filter { it !in numerosSeleccionados }.randomOrNull()
+                num?.let { numerosSeleccionados.add(it) }
+            }
+            
+            // Del pool de PATRONES
+            if (poolPatrones.isNotEmpty()) {
+                poolPatrones.shuffled(rnd)
+                    .filter { it !in numerosSeleccionados }
+                    .take(numPat)
+                    .forEach { numerosSeleccionados.add(it) }
+            }
+            
+            // Completar si faltan (por solapamiento de pools)
+            while (numerosSeleccionados.size < cantidadNumeros) {
+                val disponibles = (1..maxNumero).filter { it !in numerosSeleccionados }
+                if (disponibles.isNotEmpty()) {
+                    numerosSeleccionados.add(disponibles.random(rnd))
+                } else break
+            }
+            
+            // Verificar diversidad con combinaciones anteriores
+            val numSet = numerosSeleccionados.toSet()
             val esDiferente = combinacionesVistas.all { vista ->
-                (numSet - vista).size >= 2 || (vista - numSet).size >= 2
+                (numSet intersect vista).size <= 3
             }
-            if (esDiferente || combinacionesVistas.isEmpty()) {
-                seleccionadas.add(ind)
-                combinacionesVistas.add(numSet)
-            }
-            if (seleccionadas.size >= numCombinaciones) break
-        }
-        
-        // Si no hay suficientes diversas, generar aleatorias para completar
-        while (seleccionadas.size < numCombinaciones) {
-            val nuevaComb = (1..maxNumero).shuffled().take(cantidadNumeros)
-            val numSet = nuevaComb.toSet()
-            if (combinacionesVistas.none { it == numSet }) {
-                seleccionadas.add(Individuo(nuevaComb, 0.3))
+            
+            if (numSet.size == cantidadNumeros && (esDiferente || combinacionesVistas.isEmpty())) {
+                combinacionesGeneradas.add(numerosSeleccionados.sorted())
                 combinacionesVistas.add(numSet)
             }
         }
         
-        return seleccionadas.mapIndexed { i, ind ->
-            val top2 = listOf("Freq", "Gap", "Tend", "Mem").take(2).joinToString("+")
+        // Si no hay suficientes, completar
+        while (combinacionesGeneradas.size < numCombinaciones) {
+            val nueva = (1..maxNumero).shuffled(rnd).take(cantidadNumeros).sorted()
+            if (combinacionesVistas.add(nueva.toSet())) {
+                combinacionesGeneradas.add(nueva)
+            }
+        }
+        
+        // Info para mostrar
+        val infoComposicion = "G:${(pGap*100).toInt()}% F:${(pFrec*100).toInt()}% T:${(pTend*100).toInt()}%"
+        
+        return combinacionesGeneradas.mapIndexed { i, nums ->
             CombinacionSugerida(
-                numeros = ind.genes.sorted(),
-                probabilidadRelativa = (ind.fitness * 100).roundTo(1),
-                explicacion = "🤖 $nombreNivel #${i+1} | Score:${(ind.fitness*100).roundTo(1)} | $top2 | Exp:$entrenamientos"
+                numeros = nums,
+                probabilidadRelativa = ((pGap + pFrec + pTend) * 100).roundTo(1),
+                explicacion = "🤖 $nombreNivel | $infoComposicion | Exp:$totalEntrenamientos"
             )
         }
     }
@@ -217,6 +345,52 @@ class MotorInteligencia(private val context: Context? = null) {
         return pob
     }
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VERSIÓN VARIADA: Usa Random con semilla para generar resultados diferentes
+    // ═══════════════════════════════════════════════════════════════════════════
+    private fun crearPoblacionInicialVariada(car: Caracteristicas, maxNum: Int, cant: Int, rnd: Random): MutableList<Individuo> {
+        val pob = mutableListOf<Individuo>()
+        val n = config.poblacion / 6
+        
+        // Obtener diferentes pools de números con rotación basada en Random
+        val rotacion = rnd.nextInt(10)
+        val topFrec = car.frecuencias.entries.sortedByDescending { it.value }.drop(rotacion).take(25).map { it.key }
+        val topGap = car.gaps.entries.sortedByDescending { it.value }.drop(rotacion).take(25).map { it.key }
+        val topTend = car.tendencia.entries.sortedByDescending { it.value }.drop(rotacion).take(25).map { it.key }
+        val bottomFrec = car.frecuencias.entries.sortedBy { it.value }.take(20).map { it.key }
+        
+        // Por frecuencia alta (con variación)
+        repeat(n) { 
+            pob.add(Individuo(topFrec.shuffled(rnd).take(cant))) 
+        }
+        // Por gap (números atrasados)
+        repeat(n) { 
+            pob.add(Individuo(topGap.shuffled(rnd).take(cant))) 
+        }
+        // Por tendencia reciente
+        repeat(n) { 
+            pob.add(Individuo(topTend.shuffled(rnd).take(cant))) 
+        }
+        // Mixto: frecuentes + atrasados
+        repeat(n) {
+            val mix = (topFrec.shuffled(rnd).take(cant/2) + topGap.shuffled(rnd).take(cant - cant/2)).distinct()
+            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled(rnd).take(cant - mix.size) else emptyList()
+            pob.add(Individuo((mix + completar).take(cant)))
+        }
+        // Mixto: frecuentes + fríos (contrarios)
+        repeat(n) {
+            val mix = (topFrec.shuffled(rnd).take(cant - 2) + bottomFrec.shuffled(rnd).take(2)).distinct()
+            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled(rnd).take(cant - mix.size) else emptyList()
+            pob.add(Individuo((mix + completar).take(cant)))
+        }
+        // Aleatorio puro (más cantidad)
+        while (pob.size < config.poblacion) {
+            pob.add(Individuo((1..maxNum).shuffled(rnd).take(cant)))
+        }
+        
+        return pob
+    }
+    
     private fun evolucionarGeneracion(pob: MutableList<Individuo>, car: Caracteristicas, maxNum: Int, cant: Int): MutableList<Individuo> {
         val nueva = mutableListOf<Individuo>()
         val elite = (config.poblacion * config.elitismo).toInt()
@@ -238,6 +412,52 @@ class MotorInteligencia(private val context: Context? = null) {
                 val genes = hijo.genes.toMutableList()
                 val idx = Random.nextInt(genes.size)
                 genes[idx] = (1..maxNum).filter { it !in genes }.random()
+                hijo = Individuo(genes)
+            }
+            
+            evaluarFitness(hijo, car)
+            nueva.add(hijo)
+        }
+        return nueva
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VERSIÓN VARIADA: Evolución con más aleatoriedad y Random controlado
+    // ═══════════════════════════════════════════════════════════════════════════
+    private fun evolucionarGeneracionVariada(pob: MutableList<Individuo>, car: Caracteristicas, maxNum: Int, cant: Int, rnd: Random): MutableList<Individuo> {
+        val nueva = mutableListOf<Individuo>()
+        // Menos elitismo para más variación (15% en lugar del normal)
+        val elite = (config.poblacion * 0.15).toInt()
+        nueva.addAll(pob.shuffled(rnd).sortedByDescending { it.fitness }.take(elite))
+        
+        // Tasa de cruce y mutación más alta para más variación
+        val tasaCruceAlta = 0.85
+        val tasaMutacionAlta = 0.25
+        
+        while (nueva.size < config.poblacion) {
+            val p1 = pob.shuffled(rnd).take(4).maxByOrNull { it.fitness }!!
+            val p2 = pob.shuffled(rnd).take(4).maxByOrNull { it.fitness }!!
+            
+            var hijo = if (rnd.nextDouble() < tasaCruceAlta) {
+                val genes = (p1.genes + p2.genes).distinct().shuffled(rnd).take(cant)
+                val completar = if (genes.size < cant) (1..maxNum).filter { it !in genes }.shuffled(rnd).take(cant - genes.size) else emptyList()
+                Individuo(genes + completar)
+            } else {
+                Individuo(if (rnd.nextBoolean()) p1.genes.toList() else p2.genes.toList())
+            }
+            
+            // Mutación más agresiva
+            if (rnd.nextDouble() < tasaMutacionAlta) {
+                val genes = hijo.genes.toMutableList()
+                // Mutar 1 o 2 genes
+                val numMutaciones = if (rnd.nextDouble() < 0.3) 2 else 1
+                repeat(numMutaciones) {
+                    val idx = rnd.nextInt(genes.size)
+                    val disponibles = (1..maxNum).filter { it !in genes }
+                    if (disponibles.isNotEmpty()) {
+                        genes[idx] = disponibles.random(rnd)
+                    }
+                }
                 hijo = Individuo(genes)
             }
             
