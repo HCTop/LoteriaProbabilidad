@@ -105,12 +105,35 @@ enum class MetodoCalculo(
     val descripcion: String,
     val explicacionCorta: String
 ) {
+    ENSEMBLE_VOTING(
+        displayName = "🗳️ Ensemble Voting",
+        descripcion = "Sistema de votación que combina 8 estrategias diferentes: " +
+                "IA genética, alta confianza, rachas, equilibrio, ciclos, correlaciones, " +
+                "frecuencia y tendencia. Cada estrategia vota por sus números favoritos " +
+                "y se seleccionan los de mayor consenso.",
+        explicacionCorta = "8 estrategias votan → máximo consenso"
+    ),
+    ALTA_CONFIANZA(
+        displayName = "🎯 Alta Confianza",
+        descripcion = "Sistema de 7 señales coherentes: ciclos, tendencia reciente, " +
+                "EMA, compañeros activos, próximos por ciclo, rachas y balance. " +
+                "Solo sugiere números con alto consenso (≥4/7 señales positivas).",
+        explicacionCorta = "7 señales → solo números con alto consenso"
+    ),
+    RACHAS_MIX(
+        displayName = "🔥❄️ Mix Rachas",
+        descripcion = "Combina números calientes (en racha positiva) con números fríos " +
+                "(debidos por no salir). Estrategia: 2-3 calientes + 1-2 fríos + normales. " +
+                "Detecta rachas en los últimos 20 sorteos.",
+        explicacionCorta = "Mezcla de números calientes y debidos"
+    ),
     IA_GENETICA(
         displayName = "🤖 IA Genética",
         descripcion = "Sistema de Inteligencia Artificial que usa algoritmos genéticos con 500 individuos " +
-                "evolucionando durante 50 generaciones. Combina: análisis de frecuencias, gaps, tendencias, " +
-                "patrones de pares, balance estructural y detección de ciclos. Los pesos se ajustan dinámicamente.",
-        explicacionCorta = "Algoritmo genético + ensemble de 6 predictores"
+                "evolucionando durante 60 generaciones. Combina: análisis de frecuencias, gaps, tendencias, " +
+                "patrones de pares, balance estructural, ciclos, correlaciones y rachas. " +
+                "Los pesos se ajustan dinámicamente con optimizador Adam.",
+        explicacionCorta = "Algoritmo genético + ensemble de 10 predictores"
     ),
     LAPLACE(
         displayName = "Regla de Laplace",
@@ -159,6 +182,19 @@ enum class MetodoCalculo(
         descripcion = "Genera combinaciones completamente aleatorias. " +
                 "Matemáticamente, tan válido como cualquier otro método.",
         explicacionCorta = "Selección totalmente al azar"
+    ),
+    METODO_ABUELO(
+        displayName = "🔮📐 Método del Abuelo",
+        descripcion = "Sistema MATEMÁTICO AVANZADO que combina 7 algoritmos rigurosos: " +
+                "Test Chi-Cuadrado (detecta sesgos reales en bolas/máquinas), " +
+                "Análisis de Fourier (periodicidades genuinas), " +
+                "Inferencia Bayesiana (probabilidades actualizadas con cada sorteo), " +
+                "Cadenas de Markov (transiciones entre sorteos), " +
+                "Análisis de Entropía (ventanas de baja aleatoriedad), " +
+                "Diseños de Cobertura (maximiza aciertos parciales) y " +
+                "Validación Monte Carlo (verifica mejora sobre el azar). " +
+                "Solo da peso a factores ESTADÍSTICAMENTE SIGNIFICATIVOS (p<0.05).",
+        explicacionCorta = "χ² + Fourier + Bayes + Markov + Entropía + Monte Carlo"
     )
 }
 

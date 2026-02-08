@@ -24,12 +24,23 @@ class MemoriaIA(context: Context) {
     )
     
     companion object {
-        // Parámetros de aprendizaje
-        private const val LEARNING_RATE = 0.15
+        // ═══════════════════════════════════════════════════════════════════════════
+        // MEJORA 5: Parámetros del Optimizador Adam
+        // ═══════════════════════════════════════════════════════════════════════════
+        private const val ADAM_LEARNING_RATE = 0.01   // α - Learning rate (más bajo que SGD)
+        private const val ADAM_LEARNING_RATE_ABUELO = 0.03 // α para Abuelo (más agresivo)
+        private const val ADAM_BETA1 = 0.9            // β₁ - Decay rate para momentum
+        private const val ADAM_BETA2 = 0.999          // β₂ - Decay rate para velocity
+        private const val ADAM_EPSILON = 1e-8         // ε - Evita división por cero
+
+        // Parámetros de regularización
+        private const val MIN_PESO = 0.03
+        private const val MAX_PESO = 0.40
+        private const val L2_REGULARIZATION = 0.001   // Regularización L2 para evitar pesos extremos
+
+        // Factor de decay para scores de números/pares exitosos (no para Adam)
         private const val DECAY_FACTOR = 0.98
-        private const val MIN_PESO = 0.05
-        private const val MAX_PESO = 0.50
-        
+
         // Características que la IA aprende a ponderar
         val CARACTERISTICAS = listOf(
             "frecuencia",
@@ -65,6 +76,19 @@ class MemoriaIA(context: Context) {
         }
     }
     
+    /**
+     * MEJORA 5: Actualiza los pesos usando el Optimizador Adam.
+     *
+     * Adam (Adaptive Moment Estimation) combina:
+     * - Momentum: promedio móvil de los gradientes (m)
+     * - RMSprop: promedio móvil de los gradientes² (v)
+     * - Bias correction: corrección para los primeros pasos
+     *
+     * Ventajas sobre SGD simple:
+     * - Converge más rápido
+     * - Maneja mejor gradientes ruidosos
+     * - Learning rate adaptativo por parámetro
+     */
     fun actualizarPesos(
         contribuciones: Map<String, Double>,
         puntuacionTotal: Double,
@@ -72,45 +96,141 @@ class MemoriaIA(context: Context) {
         tipoLoteria: String
     ) {
         val pesosActuales = obtenerPesosCaracteristicas(tipoLoteria).toMutableMap()
-        
+
+        // Cargar estados de Adam (momentum y velocity)
+        val momentum = obtenerMomentum(tipoLoteria)
+        val velocity = obtenerVelocity(tipoLoteria)
+
+        // Obtener el paso actual (t) para bias correction
+        val t = obtenerTotalEntrenamientos(tipoLoteria) + 1
+
+        // Factor de éxito basado en rendimiento
         val exito = if (mejorPuntuacionHistorica > 0) {
             (puntuacionTotal / mejorPuntuacionHistorica).coerceIn(0.5, 2.0)
         } else {
             1.0
         }
-        
+
         val totalContrib = contribuciones.values.sum().coerceAtLeast(0.001)
-        
+
         for (car in CARACTERISTICAS) {
             val pesoActual = pesosActuales[car] ?: (1.0 / CARACTERISTICAS.size)
             val contrib = contribuciones[car] ?: 0.0
             val contribNorm = contrib / totalContrib
-            
+
+            // Calcular gradiente (dirección de mejora)
             val gradiente = (contribNorm - pesoActual) * exito
-            val delta = LEARNING_RATE * gradiente
-            val nuevoPeso = (pesoActual * DECAY_FACTOR + delta * (1 - DECAY_FACTOR))
-                .coerceIn(MIN_PESO, MAX_PESO)
-            
+
+            // Añadir regularización L2 (penaliza pesos grandes)
+            val gradienteConL2 = gradiente - L2_REGULARIZATION * pesoActual
+
+            // ═══════════════════════════════════════════════════════════════════
+            // ALGORITMO ADAM
+            // ═══════════════════════════════════════════════════════════════════
+
+            // Actualizar momentum (promedio móvil exponencial del gradiente)
+            // m_t = β₁ * m_{t-1} + (1 - β₁) * g_t
+            val mPrev = momentum[car] ?: 0.0
+            val mNew = ADAM_BETA1 * mPrev + (1 - ADAM_BETA1) * gradienteConL2
+            momentum[car] = mNew
+
+            // Actualizar velocity (promedio móvil exponencial del gradiente²)
+            // v_t = β₂ * v_{t-1} + (1 - β₂) * g_t²
+            val vPrev = velocity[car] ?: 0.0
+            val vNew = ADAM_BETA2 * vPrev + (1 - ADAM_BETA2) * gradienteConL2 * gradienteConL2
+            velocity[car] = vNew
+
+            // Bias correction (importante en los primeros pasos)
+            // m̂_t = m_t / (1 - β₁^t)
+            // v̂_t = v_t / (1 - β₂^t)
+            val mHat = mNew / (1 - Math.pow(ADAM_BETA1, t.toDouble()))
+            val vHat = vNew / (1 - Math.pow(ADAM_BETA2, t.toDouble()))
+
+            // Actualizar peso
+            // θ_t = θ_{t-1} + α * m̂_t / (√v̂_t + ε)
+            val delta = ADAM_LEARNING_RATE * mHat / (Math.sqrt(vHat) + ADAM_EPSILON)
+            val nuevoPeso = (pesoActual + delta).coerceIn(MIN_PESO, MAX_PESO)
+
             pesosActuales[car] = nuevoPeso
         }
-        
-        // Normalizar
+
+        // Normalizar pesos para que sumen 1.0
         val suma = pesosActuales.values.sum()
-        pesosActuales.forEach { (k, v) -> pesosActuales[k] = v / suma }
-        
-        // Guardar
+        if (suma > 0) {
+            pesosActuales.forEach { (k, v) -> pesosActuales[k] = v / suma }
+        }
+
+        // Guardar todo
         guardarPesosCaracteristicas(pesosActuales, tipoLoteria)
-        
-        // Actualizar mejor puntuación
+        guardarMomentum(momentum, tipoLoteria)
+        guardarVelocity(velocity, tipoLoteria)
+
+        // Actualizar mejor puntuación si mejoramos
         if (puntuacionTotal > obtenerMejorPuntuacion(tipoLoteria)) {
             guardarMejorPuntuacion(puntuacionTotal, tipoLoteria)
         }
-        
-        // Incrementar entrenamientos
+
+        // Incrementar contador de entrenamientos
         incrementarEntrenamientos(tipoLoteria)
-        
+
         // Guardar timestamp
         guardarUltimaActualizacion(tipoLoteria)
+    }
+
+    // ==================== ESTADOS DE ADAM (POR LOTERÍA) ====================
+
+    /**
+     * MEJORA 5: Obtiene el estado de momentum para Adam.
+     */
+    private fun obtenerMomentum(tipoLoteria: String): MutableMap<String, Double> {
+        val key = "adam_momentum_$tipoLoteria"
+        val json = prefs.getString(key, null) ?: return mutableMapOf()
+
+        return try {
+            val jsonObj = JSONObject(json)
+            CARACTERISTICAS.associateWith { car ->
+                jsonObj.optDouble(car, 0.0)
+            }.toMutableMap()
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    /**
+     * MEJORA 5: Guarda el estado de momentum para Adam.
+     */
+    private fun guardarMomentum(momentum: Map<String, Double>, tipoLoteria: String) {
+        val key = "adam_momentum_$tipoLoteria"
+        val json = JSONObject()
+        momentum.forEach { (k, v) -> json.put(k, v) }
+        prefs.edit().putString(key, json.toString()).apply()
+    }
+
+    /**
+     * MEJORA 5: Obtiene el estado de velocity para Adam.
+     */
+    private fun obtenerVelocity(tipoLoteria: String): MutableMap<String, Double> {
+        val key = "adam_velocity_$tipoLoteria"
+        val json = prefs.getString(key, null) ?: return mutableMapOf()
+
+        return try {
+            val jsonObj = JSONObject(json)
+            CARACTERISTICAS.associateWith { car ->
+                jsonObj.optDouble(car, 0.0)
+            }.toMutableMap()
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    /**
+     * MEJORA 5: Guarda el estado de velocity para Adam.
+     */
+    private fun guardarVelocity(velocity: Map<String, Double>, tipoLoteria: String) {
+        val key = "adam_velocity_$tipoLoteria"
+        val json = JSONObject()
+        velocity.forEach { (k, v) -> json.put(k, v) }
+        prefs.edit().putString(key, json.toString()).apply()
     }
     
     private fun inicializarPesosDefault(tipoLoteria: String): Map<String, Double> {
@@ -289,9 +409,14 @@ class MemoriaIA(context: Context) {
     /**
      * Reinicia la memoria de una lotería específica.
      */
+    /**
+     * Reinicia la memoria de una lotería específica o toda la memoria.
+     *
+     * MEJORA 5: También reinicia los estados del optimizador Adam.
+     */
     fun reiniciarMemoria(tipoLoteria: String? = null) {
         if (tipoLoteria != null) {
-            // Reiniciar solo esa lotería
+            // Reiniciar solo esa lotería (incluyendo estados de Adam)
             prefs.edit()
                 .remove("pesos_$tipoLoteria")
                 .remove("numeros_exitosos_$tipoLoteria")
@@ -299,6 +424,8 @@ class MemoriaIA(context: Context) {
                 .remove("entrenamientos_$tipoLoteria")
                 .remove("mejor_punt_$tipoLoteria")
                 .remove("ultima_act_$tipoLoteria")
+                .remove("adam_momentum_$tipoLoteria")   // MEJORA 5
+                .remove("adam_velocity_$tipoLoteria")   // MEJORA 5
                 .apply()
         } else {
             // Reiniciar TODO
@@ -327,19 +454,520 @@ class MemoriaIA(context: Context) {
     fun obtenerTamanoPool(): Int {
         return prefs.getInt("config_tamano_pool", 10)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // PESOS DEL MÉTODO DEL ABUELO (POR LOTERÍA)
+    // Los 5 algoritmos matemáticos aprenden qué peso darle a cada uno
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    val ALGORITMOS_ABUELO = listOf(
+        "chiCuadrado", "fourier", "bayesiano", "markov", "entropia"
+    )
+
+    /**
+     * Obtiene los pesos aprendidos para los algoritmos del Método del Abuelo.
+     * Cada algoritmo (Chi², Fourier, Bayes, Markov, Entropía) tiene un peso
+     * que indica su fiabilidad para cada tipo de lotería.
+     */
+    fun obtenerPesosAbuelo(tipoLoteria: String): Map<String, Double> {
+        val key = "pesos_abuelo_$tipoLoteria"
+        val json = prefs.getString(key, null)
+
+        return if (json != null) {
+            try {
+                val jsonObj = JSONObject(json)
+                ALGORITMOS_ABUELO.associateWith { alg ->
+                    jsonObj.optDouble(alg, 1.0 / ALGORITMOS_ABUELO.size)
+                }
+            } catch (e: Exception) {
+                inicializarPesosAbueloDefault(tipoLoteria)
+            }
+        } else {
+            inicializarPesosAbueloDefault(tipoLoteria)
+        }
+    }
+
+    private fun inicializarPesosAbueloDefault(tipoLoteria: String): Map<String, Double> {
+        val pesoInicial = 1.0 / ALGORITMOS_ABUELO.size
+        val pesos = ALGORITMOS_ABUELO.associateWith { pesoInicial }
+        guardarPesosAbuelo(pesos, tipoLoteria)
+        return pesos
+    }
+
+    private fun guardarPesosAbuelo(pesos: Map<String, Double>, tipoLoteria: String) {
+        val key = "pesos_abuelo_$tipoLoteria"
+        val json = JSONObject()
+        pesos.forEach { (k, v) -> json.put(k, v) }
+        prefs.edit().putString(key, json.toString()).apply()
+    }
+
+    /**
+     * Actualiza los pesos del Abuelo usando Adam Optimizer.
+     *
+     * @param contribuciones Mapa de algoritmo → contribución al resultado.
+     *   La contribución se calcula como: cuántos números del top-10 de cada algoritmo
+     *   aparecieron en el resultado real.
+     * @param aciertosTotal Número total de aciertos del Método del Abuelo en este sorteo.
+     * @param tipoLoteria Tipo de lotería.
+     */
+    fun actualizarPesosAbuelo(
+        contribuciones: Map<String, Double>,
+        aciertosTotal: Int,
+        tipoLoteria: String
+    ) {
+        val pesosActuales = obtenerPesosAbuelo(tipoLoteria).toMutableMap()
+
+        // Cargar estados de Adam específicos para Abuelo
+        val momentum = obtenerMomentumAbuelo(tipoLoteria)
+        val velocity = obtenerVelocityAbuelo(tipoLoteria)
+        val t = (prefs.getInt("abuelo_train_count_$tipoLoteria", 0) + 1)
+
+        val totalContrib = contribuciones.values.sum().coerceAtLeast(0.001)
+
+        for (alg in ALGORITMOS_ABUELO) {
+            val pesoActual = pesosActuales[alg] ?: (1.0 / ALGORITMOS_ABUELO.size)
+            val contrib = contribuciones[alg] ?: 0.0
+            val contribNorm = contrib / totalContrib
+
+            // Gradiente: mover peso hacia la contribución normalizada
+            val gradiente = (contribNorm - pesoActual)
+            val gradienteConL2 = gradiente - L2_REGULARIZATION * pesoActual
+
+            // Adam update
+            val mPrev = momentum[alg] ?: 0.0
+            val mNew = ADAM_BETA1 * mPrev + (1 - ADAM_BETA1) * gradienteConL2
+            momentum[alg] = mNew
+
+            val vPrev = velocity[alg] ?: 0.0
+            val vNew = ADAM_BETA2 * vPrev + (1 - ADAM_BETA2) * gradienteConL2 * gradienteConL2
+            velocity[alg] = vNew
+
+            val mHat = mNew / (1 - Math.pow(ADAM_BETA1, t.toDouble()))
+            val vHat = vNew / (1 - Math.pow(ADAM_BETA2, t.toDouble()))
+
+            val delta = ADAM_LEARNING_RATE_ABUELO * mHat / (Math.sqrt(vHat) + ADAM_EPSILON)
+            pesosActuales[alg] = (pesoActual + delta).coerceIn(0.05, 0.50)
+        }
+
+        // Normalizar
+        val suma = pesosActuales.values.sum()
+        if (suma > 0) {
+            pesosActuales.forEach { (k, v) -> pesosActuales[k] = v / suma }
+        }
+
+        guardarPesosAbuelo(pesosActuales, tipoLoteria)
+        guardarMomentumAbuelo(momentum, tipoLoteria)
+        guardarVelocityAbuelo(velocity, tipoLoteria)
+        prefs.edit().putInt("abuelo_train_count_$tipoLoteria", t).apply()
+    }
+
+    private fun obtenerMomentumAbuelo(tipoLoteria: String): MutableMap<String, Double> {
+        val json = prefs.getString("adam_m_abuelo_$tipoLoteria", null) ?: return mutableMapOf()
+        return try {
+            val jsonObj = JSONObject(json)
+            ALGORITMOS_ABUELO.associateWith { jsonObj.optDouble(it, 0.0) }.toMutableMap()
+        } catch (e: Exception) { mutableMapOf() }
+    }
+
+    private fun guardarMomentumAbuelo(m: Map<String, Double>, tipoLoteria: String) {
+        val json = JSONObject()
+        m.forEach { (k, v) -> json.put(k, v) }
+        prefs.edit().putString("adam_m_abuelo_$tipoLoteria", json.toString()).apply()
+    }
+
+    private fun obtenerVelocityAbuelo(tipoLoteria: String): MutableMap<String, Double> {
+        val json = prefs.getString("adam_v_abuelo_$tipoLoteria", null) ?: return mutableMapOf()
+        return try {
+            val jsonObj = JSONObject(json)
+            ALGORITMOS_ABUELO.associateWith { jsonObj.optDouble(it, 0.0) }.toMutableMap()
+        } catch (e: Exception) { mutableMapOf() }
+    }
+
+    private fun guardarVelocityAbuelo(v: Map<String, Double>, tipoLoteria: String) {
+        val json = JSONObject()
+        v.forEach { (k, v2) -> json.put(k, v2) }
+        prefs.edit().putString("adam_v_abuelo_$tipoLoteria", json.toString()).apply()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // MEJORA 9: FUNCIONES PARA ENSEMBLE VOTING
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Lista de estrategias disponibles (debe coincidir con EstrategiaPrediccion en MotorInteligencia).
+     */
+    private val ESTRATEGIAS = listOf(
+        "GENETICO",
+        "ALTA_CONFIANZA",
+        "RACHAS_MIX",
+        "EQUILIBRIO",
+        "CICLOS",
+        "CORRELACIONES",
+        "FRECUENCIA",
+        "TENDENCIA"
+    )
+
+    /**
+     * MEJORA 9: Obtiene los pesos aprendidos para cada estrategia.
+     *
+     * Los pesos se ajustan con el tiempo según el rendimiento de cada estrategia.
+     * Una estrategia que acierta más obtiene más peso.
+     *
+     * @return Mapa de estrategia -> peso, o null si no hay datos aprendidos
+     */
+    fun obtenerPesosEstrategias(tipoLoteria: String): Map<MotorInteligencia.EstrategiaPrediccion, Double>? {
+        val key = "pesos_estrategias_$tipoLoteria"
+        val json = prefs.getString(key, null) ?: return null
+
+        return try {
+            val jsonObj = JSONObject(json)
+            MotorInteligencia.EstrategiaPrediccion.values().associateWith { estrategia ->
+                jsonObj.optDouble(estrategia.name, 1.0)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * MEJORA 9: Guarda los pesos de las estrategias.
+     */
+    private fun guardarPesosEstrategias(
+        pesos: Map<MotorInteligencia.EstrategiaPrediccion, Double>,
+        tipoLoteria: String
+    ) {
+        val key = "pesos_estrategias_$tipoLoteria"
+        val jsonObj = JSONObject()
+
+        pesos.forEach { (estrategia, peso) ->
+            jsonObj.put(estrategia.name, peso)
+        }
+
+        prefs.edit().putString(key, jsonObj.toString()).apply()
+    }
+
+    /**
+     * MEJORA 9: Registra el rendimiento de cada estrategia para meta-aprendizaje.
+     *
+     * Después de cada sorteo real, se llama a esta función con los aciertos
+     * de cada estrategia. Los pesos se actualizan para dar más peso a
+     * las estrategias que aciertan más.
+     *
+     * @param aciertosEstrategia Mapa de estrategia -> número de aciertos
+     * @param tipoLoteria Tipo de lotería
+     */
+    fun registrarRendimientoEstrategias(
+        aciertosEstrategia: Map<MotorInteligencia.EstrategiaPrediccion, Int>,
+        tipoLoteria: String
+    ) {
+        // Obtener pesos actuales o inicializar con 1.0
+        val pesosActuales = obtenerPesosEstrategias(tipoLoteria)?.toMutableMap()
+            ?: MotorInteligencia.EstrategiaPrediccion.values().associateWith { 1.0 }.toMutableMap()
+
+        // Calcular el promedio de aciertos
+        val promedioAciertos = aciertosEstrategia.values.average()
+
+        // Actualizar pesos según rendimiento
+        val learningRate = 0.1
+        aciertosEstrategia.forEach { (estrategia, aciertos) ->
+            val pesoActual = pesosActuales[estrategia] ?: 1.0
+
+            // Si la estrategia acertó más que el promedio, aumentar peso
+            // Si acertó menos, reducir peso
+            val diferencia = (aciertos - promedioAciertos) / 6.0  // Normalizado por 6 números
+            val nuevoPeso = pesoActual + (diferencia * learningRate)
+
+            pesosActuales[estrategia] = nuevoPeso.coerceIn(0.3, 2.0)
+        }
+
+        // Normalizar para que el promedio sea 1.0
+        val promedioPesos = pesosActuales.values.average()
+        if (promedioPesos > 0) {
+            pesosActuales.forEach { (estrategia, peso) ->
+                pesosActuales[estrategia] = peso / promedioPesos
+            }
+        }
+
+        // Guardar pesos actualizados
+        guardarPesosEstrategias(pesosActuales, tipoLoteria)
+
+        // Registrar historial para análisis
+        registrarHistorialEstrategias(aciertosEstrategia, tipoLoteria)
+    }
+
+    /**
+     * MEJORA 9: Registra el historial de rendimiento de estrategias.
+     */
+    private fun registrarHistorialEstrategias(
+        aciertos: Map<MotorInteligencia.EstrategiaPrediccion, Int>,
+        tipoLoteria: String
+    ) {
+        val key = "historial_estrategias_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        try {
+            val historial = org.json.JSONArray(historialJson)
+
+            // Limitar a últimos 100 registros
+            while (historial.length() >= 100) {
+                historial.remove(0)
+            }
+
+            // Añadir nuevo registro
+            val registro = JSONObject()
+            registro.put("fecha", System.currentTimeMillis())
+            aciertos.forEach { (estrategia, numAciertos) ->
+                registro.put(estrategia.name, numAciertos)
+            }
+            historial.put(registro)
+
+            prefs.edit().putString(key, historial.toString()).apply()
+        } catch (e: Exception) {
+            // Ignorar errores de JSON
+        }
+    }
+
+    /**
+     * MEJORA 9: Obtiene estadísticas de rendimiento de las estrategias.
+     *
+     * @return Mapa de estrategia -> (promedio de aciertos, mejor acierto)
+     */
+    fun obtenerEstadisticasEstrategias(tipoLoteria: String): Map<String, Pair<Double, Int>> {
+        val key = "historial_estrategias_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        val estadisticas = mutableMapOf<String, Pair<Double, Int>>()
+
+        try {
+            val historial = org.json.JSONArray(historialJson)
+
+            for (estrategia in ESTRATEGIAS) {
+                val aciertosLista = mutableListOf<Int>()
+
+                for (i in 0 until historial.length()) {
+                    val registro = historial.getJSONObject(i)
+                    if (registro.has(estrategia)) {
+                        aciertosLista.add(registro.getInt(estrategia))
+                    }
+                }
+
+                if (aciertosLista.isNotEmpty()) {
+                    val promedio = aciertosLista.average()
+                    val mejor = aciertosLista.maxOrNull() ?: 0
+                    estadisticas[estrategia] = Pair(promedio, mejor)
+                }
+            }
+        } catch (e: Exception) {
+            // Ignorar errores
+        }
+
+        return estadisticas
+    }
+
+    /**
+     * MEJORA 9: Obtiene la mejor estrategia para una lotería específica.
+     */
+    fun obtenerMejorEstrategia(tipoLoteria: String): String? {
+        val pesos = obtenerPesosEstrategias(tipoLoteria) ?: return null
+        return pesos.maxByOrNull { it.value }?.key?.name
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // MEJORA 13: HISTORIAL DE PREDICCIONES
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Guarda una predicción en el historial.
+     */
+    fun guardarPrediccion(
+        fecha: String,
+        tipoLoteria: String,
+        metodo: String,
+        combinacion: List<Int>,
+        complementarios: List<Int>
+    ) {
+        val key = "historial_predicciones_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        try {
+            val historial = org.json.JSONArray(historialJson)
+
+            val registro = JSONObject().apply {
+                put("fecha", fecha)
+                put("metodo", metodo)
+                put("combinacion", org.json.JSONArray(combinacion))
+                put("complementarios", org.json.JSONArray(complementarios))
+                put("resultadoReal", org.json.JSONArray())
+                put("complementariosReales", org.json.JSONArray())
+                put("aciertos", -1)  // -1 = pendiente
+                put("aciertosComplementarios", -1)
+            }
+
+            historial.put(registro)
+
+            // Limitar a últimas 100 predicciones
+            while (historial.length() > 100) {
+                historial.remove(0)
+            }
+
+            prefs.edit().putString(key, historial.toString()).apply()
+        } catch (e: Exception) {
+            // Ignorar errores
+        }
+    }
+
+    /**
+     * Actualiza una predicción con el resultado real.
+     */
+    fun actualizarPrediccionConResultado(
+        fecha: String,
+        tipoLoteria: String,
+        resultadoReal: List<Int>,
+        complementariosReales: List<Int>
+    ) {
+        val key = "historial_predicciones_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        try {
+            val historial = org.json.JSONArray(historialJson)
+            val nuevoHistorial = org.json.JSONArray()
+
+            for (i in 0 until historial.length()) {
+                val registro = historial.getJSONObject(i)
+
+                // Si es la fecha correcta y aún no tiene resultado
+                if (registro.getString("fecha") == fecha && registro.getInt("aciertos") == -1) {
+                    // Obtener combinación predicha
+                    val combJson = registro.getJSONArray("combinacion")
+                    val combinacion = (0 until combJson.length()).map { combJson.getInt(it) }
+
+                    val compJson = registro.getJSONArray("complementarios")
+                    val complementarios = (0 until compJson.length()).map { compJson.getInt(it) }
+
+                    // Calcular aciertos
+                    val aciertos = combinacion.count { it in resultadoReal }
+                    val aciertosComp = complementarios.count { it in complementariosReales }
+
+                    // Actualizar registro
+                    registro.put("resultadoReal", org.json.JSONArray(resultadoReal))
+                    registro.put("complementariosReales", org.json.JSONArray(complementariosReales))
+                    registro.put("aciertos", aciertos)
+                    registro.put("aciertosComplementarios", aciertosComp)
+                }
+
+                nuevoHistorial.put(registro)
+            }
+
+            prefs.edit().putString(key, nuevoHistorial.toString()).apply()
+        } catch (e: Exception) {
+            // Ignorar errores
+        }
+    }
+
+    /**
+     * Obtiene el historial de predicciones.
+     */
+    fun obtenerHistorialPredicciones(
+        tipoLoteria: String,
+        limite: Int
+    ): List<MotorInteligencia.RegistroPrediccion> {
+        val key = "historial_predicciones_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        return try {
+            val historial = org.json.JSONArray(historialJson)
+            val lista = mutableListOf<MotorInteligencia.RegistroPrediccion>()
+
+            // Iterar desde el más reciente
+            for (i in (historial.length() - 1) downTo maxOf(0, historial.length() - limite)) {
+                val registro = historial.getJSONObject(i)
+
+                val combJson = registro.getJSONArray("combinacion")
+                val combinacion = (0 until combJson.length()).map { combJson.getInt(it) }
+
+                val compJson = registro.getJSONArray("complementarios")
+                val complementarios = (0 until compJson.length()).map { compJson.getInt(it) }
+
+                val resJson = registro.getJSONArray("resultadoReal")
+                val resultadoReal = if (resJson.length() > 0) {
+                    (0 until resJson.length()).map { resJson.getInt(it) }
+                } else null
+
+                val compRealesJson = registro.getJSONArray("complementariosReales")
+                val complementariosReales = if (compRealesJson.length() > 0) {
+                    (0 until compRealesJson.length()).map { compRealesJson.getInt(it) }
+                } else null
+
+                val aciertos = registro.getInt("aciertos")
+                val aciertosComp = registro.getInt("aciertosComplementarios")
+
+                lista.add(MotorInteligencia.RegistroPrediccion(
+                    fecha = registro.getString("fecha"),
+                    tipoLoteria = tipoLoteria,
+                    metodo = registro.getString("metodo"),
+                    combinacion = combinacion,
+                    complementarios = complementarios,
+                    resultadoReal = resultadoReal,
+                    complementariosReales = complementariosReales,
+                    aciertos = if (aciertos >= 0) aciertos else null,
+                    aciertosComplementarios = if (aciertosComp >= 0) aciertosComp else null
+                ))
+            }
+
+            lista
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 }
 
 /**
- * Configuración del algoritmo genético.
+ * Configuración del algoritmo genético MEJORADO.
+ *
+ * Mejoras implementadas:
+ * - Mutación adaptativa: decrece conforme avanzan las generaciones
+ * - Población dinámica: se ajusta según tamaño del histórico
+ * - Crossover uniforme: mejor mezcla de genes
  */
 data class ConfiguracionGenetica(
-    val poblacion: Int = 500,
-    val generaciones: Int = 50,
-    val tasaMutacion: Double = 0.15,
-    val tasaCruce: Double = 0.7,
-    val elitismo: Double = 0.1,
-    val tamanoPool: Int = 10  // Cuántos números top considerar de cada categoría (5-20)
-)
+    val poblacionBase: Int = 500,           // Población base (se ajusta dinámicamente)
+    val generaciones: Int = 60,             // Más generaciones para mejor convergencia
+    val tasaMutacionInicial: Double = 0.20, // Mutación inicial alta (exploración)
+    val tasaMutacionFinal: Double = 0.05,   // Mutación final baja (explotación)
+    val tasaCruce: Double = 0.75,           // Tasa de crossover aumentada
+    val elitismo: Double = 0.08,            // Elitismo reducido para más diversidad
+    val tamanoPool: Int = 10,               // Cuántos números top considerar de cada categoría (5-25)
+    val usarCrossoverUniforme: Boolean = true,  // Usar crossover uniforme en lugar de punto simple
+    val torneoSize: Int = 4                 // Tamaño del torneo para selección
+) {
+    // Para compatibilidad con código existente
+    val poblacion: Int get() = poblacionBase
+    val tasaMutacion: Double get() = tasaMutacionInicial
+
+    companion object {
+        const val POBLACION_MIN = 300
+        const val POBLACION_MAX = 1000
+    }
+
+    /**
+     * Calcula la población dinámica basada en el tamaño del histórico.
+     * Más datos históricos = población más grande para explorar mejor el espacio.
+     */
+    fun calcularPoblacionDinamica(historicoSize: Int): Int {
+        val factor = 1.5
+        val poblacionCalculada = (poblacionBase + (historicoSize * factor)).toInt()
+        return poblacionCalculada.coerceIn(POBLACION_MIN, POBLACION_MAX)
+    }
+
+    /**
+     * Calcula la tasa de mutación adaptativa según la generación actual.
+     * Decrece linealmente de tasaMutacionInicial a tasaMutacionFinal.
+     */
+    fun calcularTasaMutacionAdaptativa(generacionActual: Int): Double {
+        val progreso = generacionActual.toDouble() / generaciones.coerceAtLeast(1)
+        return tasaMutacionInicial - (tasaMutacionInicial - tasaMutacionFinal) * progreso
+    }
+}
 
 /**
  * Resumen del estado de la IA.

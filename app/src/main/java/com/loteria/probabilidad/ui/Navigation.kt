@@ -89,20 +89,36 @@ fun LoteriaProbabilidadApp(
             
             val uiState by viewModel.uiState.collectAsState()
             val rangoFechas by viewModel.rangoFechasSeleccionado.collectAsState()
-            val metodo by viewModel.metodoSeleccionado.collectAsState()
-            
+            // MEJORA 11 y 13: Estados adicionales
+            val mejoresNumerosHoy by viewModel.mejoresNumerosHoy.collectAsState()
+            val diaSemanaActual by viewModel.diaSemanaActual.collectAsState()
+            val estadisticasPredicciones by viewModel.estadisticasPredicciones.collectAsState()
+            // MEJORA 11B: Predicción de complementarios
+            val prediccionComplementario by viewModel.prediccionComplementario.collectAsState()
+            val prediccionEstrellas by viewModel.prediccionEstrellas.collectAsState()
+            // Historial de evaluaciones y ranking
+            val historialEvaluado by viewModel.historialEvaluado.collectAsState()
+            val rankingMetodos by viewModel.rankingMetodos.collectAsState()
+            val prediccionesInfo by viewModel.prediccionesInfo.collectAsState()
+
             PantallaResultados(
                 tipoLoteria = tipoLoteria,
                 uiState = uiState,
                 rangoFechasSeleccionado = rangoFechas,
-                metodoSeleccionado = metodo,
                 onBackClick = { navController.popBackStack() },
                 onRefresh = { viewModel.regenerarResultados() },
                 onCambiarRangoFechas = { viewModel.cambiarRangoFechas(it) },
-                onCambiarMetodo = { viewModel.cambiarMetodo(it) },
-                onBacktestClick = { 
+                onBacktestClick = {
                     navController.navigate(Screen.Backtest.createRoute(tipoLoteria))
-                }
+                },
+                mejoresNumerosHoy = mejoresNumerosHoy,
+                diaSemanaActual = diaSemanaActual,
+                estadisticasPredicciones = estadisticasPredicciones,
+                prediccionComplementario = prediccionComplementario,
+                prediccionEstrellas = prediccionEstrellas,
+                historialEvaluado = historialEvaluado,
+                rankingMetodos = rankingMetodos,
+                prediccionesInfo = prediccionesInfo
             )
         }
         

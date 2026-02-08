@@ -17,9 +17,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.loteria.probabilidad.data.model.TipoLoteria
 import com.loteria.probabilidad.ui.components.DisclaimerCard
 import com.loteria.probabilidad.ui.components.LoteriaButton
+import com.loteria.probabilidad.ui.components.LoteriaButtonConPrediccion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,12 +41,16 @@ fun PantallaSeleccionLoteria(
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
+    // ViewModel para predicciones
+    val viewModel: SeleccionViewModel = viewModel(
+        factory = SeleccionViewModel.Factory(context)
+    )
+    val predicciones by viewModel.predicciones.collectAsState()
+    val cargandoPredicciones by viewModel.cargando.collectAsState()
+
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
-    
-    // Usuario de GitHub hardcodeado
-    val githubUser = "HCTop"
     
     Scaffold(
         topBar = {
@@ -111,27 +117,43 @@ fun PantallaSeleccionLoteria(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
             )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.PRIMITIVA,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.PRIMITIVA) }
-            )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.BONOLOTO,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.BONOLOTO) }
-            )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.EUROMILLONES,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.EUROMILLONES) }
-            )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.GORDO_PRIMITIVA,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.GORDO_PRIMITIVA) }
-            )
-            
+
+            // Helper para crear botones con predicción
+            @Composable
+            fun BotonLoteria(tipo: TipoLoteria) {
+                val pred = predicciones[tipo]
+                LoteriaButtonConPrediccion(
+                    tipoLoteria = tipo,
+                    onClick = { onLoteriaSeleccionada(tipo) },
+                    numerosPredichos = pred?.numerosPredichos ?: emptyList(),
+                    mejorMetodo = pred?.mejorMetodo?.displayName ?: "",
+                    tasaAcierto = pred?.tasaAcierto ?: 0.0,
+                    proximoDia = pred?.proximoDiaSorteo ?: "",
+                    complementario = pred?.complementarioPredicho,
+                    complementario2 = pred?.complementarioPredicho2,
+                    cargando = cargandoPredicciones,
+                    ultimoSorteoNumeros = pred?.ultimoSorteoNumeros ?: emptyList(),
+                    ultimoSorteoFecha = pred?.ultimoSorteoFecha ?: "",
+                    ultimoSorteoComp1 = pred?.ultimoSorteoComplementario,
+                    ultimoSorteoComp2 = pred?.ultimoSorteoComplementario2,
+                    metodoMejorAcierto = pred?.metodoMejorAcierto?.displayName ?: "",
+                    aciertosDelMejorMetodo = pred?.aciertosDelMejorMetodo ?: 0,
+                    numerosAcertados = pred?.numerosAcertadosMejorMetodo ?: emptyList()
+                )
+            }
+
+            // PRIMITIVA
+            BotonLoteria(TipoLoteria.PRIMITIVA)
+
+            // BONOLOTO
+            BotonLoteria(TipoLoteria.BONOLOTO)
+
+            // EUROMILLONES
+            BotonLoteria(TipoLoteria.EUROMILLONES)
+
+            // GORDO PRIMITIVA
+            BotonLoteria(TipoLoteria.GORDO_PRIMITIVA)
+
             // Sección: Sorteos especiales
             Text(
                 text = "Sorteos especiales",
@@ -140,21 +162,15 @@ fun PantallaSeleccionLoteria(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
             )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.LOTERIA_NACIONAL,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.LOTERIA_NACIONAL) }
-            )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.NAVIDAD,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.NAVIDAD) }
-            )
-            
-            LoteriaButton(
-                tipoLoteria = TipoLoteria.NINO,
-                onClick = { onLoteriaSeleccionada(TipoLoteria.NINO) }
-            )
+
+            // LOTERIA NACIONAL
+            BotonLoteria(TipoLoteria.LOTERIA_NACIONAL)
+
+            // NAVIDAD
+            BotonLoteria(TipoLoteria.NAVIDAD)
+
+            // NIÑO
+            BotonLoteria(TipoLoteria.NINO)
             
             Spacer(modifier = Modifier.height(24.dp))
             
@@ -320,9 +336,22 @@ fun PantallaSeleccionLoteria(
                                         } else {
                                             "❌ Sin conexión\n${errores.take(2).joinToString("\n")}"
                                         }
+
+                                        // Si se descargaron archivos, recargar las predicciones
+                                        if (descargados > 0) {
+                                            mensajeDescarga = mensajeDescarga + "\n🔄 Recalculando predicciones..."
+                                        }
                                     }
                                 }
-                                
+
+                                // Recargar predicciones con los nuevos datos
+                                if (descargados > 0) {
+                                    viewModel.cargarPredicciones()
+                                    withContext(Dispatchers.Main) {
+                                        mensajeDescarga = mensajeDescarga?.replace("\n🔄 Recalculando predicciones...", "\n✨ Predicciones actualizadas")
+                                    }
+                                }
+
                                 descargando = false
                             }
                         },

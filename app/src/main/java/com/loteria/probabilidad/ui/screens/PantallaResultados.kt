@@ -8,7 +8,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
@@ -20,9 +19,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.loteria.probabilidad.data.model.AnalisisProbabilidad
-import com.loteria.probabilidad.data.model.MetodoCalculo
 import com.loteria.probabilidad.data.model.OpcionRangoFechas
 import com.loteria.probabilidad.data.model.TipoLoteria
+import com.loteria.probabilidad.domain.ml.HistorialPredicciones
+import com.loteria.probabilidad.domain.ml.MotorInteligencia.PrediccionComplementarioDia
 import com.loteria.probabilidad.ui.components.*
 import kotlin.math.roundToInt
 
@@ -51,17 +51,26 @@ fun PantallaResultados(
     tipoLoteria: TipoLoteria,
     uiState: ResultadosUiState,
     rangoFechasSeleccionado: OpcionRangoFechas,
-    metodoSeleccionado: MetodoCalculo,
     onBackClick: () -> Unit,
     onRefresh: () -> Unit,
     onCambiarRangoFechas: (OpcionRangoFechas) -> Unit,
-    onCambiarMetodo: (MetodoCalculo) -> Unit,
     onBacktestClick: () -> Unit = {},
+    // MEJORA 11: Mejores números para hoy
+    mejoresNumerosHoy: List<Pair<Int, Double>> = emptyList(),
+    diaSemanaActual: String = "",
+    // MEJORA 13: Estadísticas de predicciones
+    estadisticasPredicciones: Map<String, Any> = emptyMap(),
+    // MEJORA 11B: Predicción de complementario para próximo sorteo
+    prediccionComplementario: PrediccionComplementarioDia? = null,
+    prediccionEstrellas: List<PrediccionComplementarioDia> = emptyList(),
+    // Historial de evaluaciones y ranking de métodos
+    historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
+    rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
+    prediccionesInfo: String = "",
     modifier: Modifier = Modifier
 ) {
     var mostrarSelectorFechas by remember { mutableStateOf(false) }
-    var mostrarSelectorMetodo by remember { mutableStateOf(false) }
-    
+
     // Backtesting disponible para todas las loterías
     val soportaBacktest = true
 
@@ -99,13 +108,6 @@ fun PantallaResultados(
                                 contentDescription = "Backtesting"
                             )
                         }
-                    }
-                    // Botón de método de cálculo
-                    IconButton(onClick = { mostrarSelectorMetodo = true }) {
-                        Icon(
-                            imageVector = Icons.Default.Calculate,
-                            contentDescription = "Método de cálculo"
-                        )
                     }
                     // Botón de filtro de fechas
                     IconButton(onClick = { mostrarSelectorFechas = true }) {
@@ -151,7 +153,14 @@ fun PantallaResultados(
                         analisis = uiState.analisis,
                         tipoLoteria = tipoLoteria,
                         rangoSeleccionado = rangoFechasSeleccionado,
-                        metodoSeleccionado = metodoSeleccionado
+                        mejoresNumerosHoy = mejoresNumerosHoy,
+                        diaSemanaActual = diaSemanaActual,
+                        estadisticasPredicciones = estadisticasPredicciones,
+                        prediccionComplementario = prediccionComplementario,
+                        prediccionEstrellas = prediccionEstrellas,
+                        historialEvaluado = historialEvaluado,
+                        rankingMetodos = rankingMetodos,
+                        prediccionesInfo = prediccionesInfo
                     )
                 }
             }
@@ -170,17 +179,6 @@ fun PantallaResultados(
         )
     }
 
-    // Diálogo de selección de método de cálculo
-    if (mostrarSelectorMetodo) {
-        SelectorMetodoDialog(
-            metodoActual = metodoSeleccionado,
-            onSeleccionar = { metodo ->
-                onCambiarMetodo(metodo)
-                mostrarSelectorMetodo = false
-            },
-            onDismiss = { mostrarSelectorMetodo = false }
-        )
-    }
 }
 
 @Composable
@@ -231,76 +229,18 @@ private fun SelectorRangoFechasDialog(
 }
 
 @Composable
-private fun SelectorMetodoDialog(
-    metodoActual: MetodoCalculo,
-    onSeleccionar: (MetodoCalculo) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "🧮 Método de cálculo",
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState())
-            ) {
-                MetodoCalculo.entries.forEach { metodo ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onSeleccionar(metodo) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (metodo == metodoActual) 
-                                MaterialTheme.colorScheme.primaryContainer 
-                            else 
-                                MaterialTheme.colorScheme.surface
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = metodo == metodoActual,
-                                onClick = { onSeleccionar(metodo) }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = metodo.displayName,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = metodo.explicacionCorta,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cerrar")
-            }
-        }
-    )
-}
-
-@Composable
 private fun ResultadosContent(
     analisis: AnalisisProbabilidad,
     tipoLoteria: TipoLoteria,
     rangoSeleccionado: OpcionRangoFechas,
-    metodoSeleccionado: MetodoCalculo,
+    mejoresNumerosHoy: List<Pair<Int, Double>> = emptyList(),
+    diaSemanaActual: String = "",
+    estadisticasPredicciones: Map<String, Any> = emptyMap(),
+    prediccionComplementario: PrediccionComplementarioDia? = null,
+    prediccionEstrellas: List<PrediccionComplementarioDia> = emptyList(),
+    historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
+    rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
+    prediccionesInfo: String = "",
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -308,20 +248,88 @@ private fun ResultadosContent(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Información del análisis con rango de fechas y método
+        // Información del análisis con rango de fechas
         item {
             InfoCard(
-                analisis = analisis, 
+                analisis = analisis,
                 rangoSeleccionado = rangoSeleccionado,
-                metodoSeleccionado = metodoSeleccionado
+                prediccionesInfo = prediccionesInfo
             )
         }
-        
-        // Tarjeta del método actual
-        item {
-            MetodoInfoCard(metodo = metodoSeleccionado)
+
+        // Tarjeta de evaluación y ranking de métodos
+        if (historialEvaluado.isNotEmpty()) {
+            item {
+                EvaluacionCard(
+                    historialEvaluado = historialEvaluado,
+                    rankingMetodos = rankingMetodos
+                )
+            }
         }
-        
+
+        // MEJORA 11: Mejores números/dígitos para hoy
+        if (mejoresNumerosHoy.isNotEmpty()) {
+            item {
+                if (tipoLoteria in listOf(TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO)) {
+                    // Para loterías de 5 dígitos, mostrar dígitos más frecuentes por posición
+                    MejoresDigitosHoyCard(
+                        digitosHoy = mejoresNumerosHoy,
+                        diaSemana = diaSemanaActual
+                    )
+                } else {
+                    MejoresNumerosHoyCard(
+                        numerosHoy = mejoresNumerosHoy,
+                        diaSemana = diaSemanaActual
+                    )
+                }
+            }
+        }
+
+        // MEJORA 11B: Predicción de complementario para próximo sorteo
+        if (prediccionComplementario != null || prediccionEstrellas.isNotEmpty()) {
+            item {
+                val tipoComp = when (tipoLoteria) {
+                    TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> "reintegro"
+                    TipoLoteria.EUROMILLONES -> "estrellas"
+                    TipoLoteria.GORDO_PRIMITIVA -> "clave"
+                    else -> "reintegro"
+                }
+
+                val rachaTexto: (PrediccionComplementarioDia) -> String = { pred ->
+                    when (pred.racha.name) {
+                        "MUY_CALIENTE" -> "🔥"
+                        "CALIENTE" -> "♨️"
+                        "MUY_FRIO" -> "🥶"
+                        "FRIO" -> "❄️"
+                        else -> "➖"
+                    }
+                }
+
+                if (tipoLoteria == TipoLoteria.EUROMILLONES && prediccionEstrellas.isNotEmpty()) {
+                    PrediccionComplementarioCard(
+                        tipoComplementario = tipoComp,
+                        numero = null,
+                        numeros = prediccionEstrellas.map { it.numero },
+                        diaSorteo = prediccionEstrellas.first().diaSorteo,
+                        porcentaje = prediccionEstrellas.first().porcentaje,
+                        frecuenciaEnDia = prediccionEstrellas.sumOf { it.frecuenciaEnDia },
+                        totalSorteosEnDia = prediccionEstrellas.first().totalSorteosEnDia,
+                        racha = prediccionEstrellas.joinToString(" ") { rachaTexto(it) }
+                    )
+                } else if (prediccionComplementario != null) {
+                    PrediccionComplementarioCard(
+                        tipoComplementario = tipoComp,
+                        numero = prediccionComplementario.numero,
+                        diaSorteo = prediccionComplementario.diaSorteo,
+                        porcentaje = prediccionComplementario.porcentaje,
+                        frecuenciaEnDia = prediccionComplementario.frecuenciaEnDia,
+                        totalSorteosEnDia = prediccionComplementario.totalSorteosEnDia,
+                        racha = rachaTexto(prediccionComplementario)
+                    )
+                }
+            }
+        }
+
         // Título de combinaciones
         item {
             Text(
@@ -330,7 +338,7 @@ private fun ResultadosContent(
                 fontWeight = FontWeight.Bold
             )
         }
-        
+
         // Lista de combinaciones
         if (analisis.combinacionesSugeridas.isEmpty()) {
             item {
@@ -345,25 +353,39 @@ private fun ResultadosContent(
                 )
             }
         }
-        
+
         // Probabilidad teórica (Laplace)
         if (analisis.probabilidadTeorica.isNotEmpty()) {
             item {
                 ProbabilidadTeoricaCard(probabilidad = analisis.probabilidadTeorica)
             }
         }
-        
+
+        // MEJORA 13: Historial de predicciones
+        if (estadisticasPredicciones.isNotEmpty()) {
+            item {
+                HistorialPrediccionesCard(
+                    totalPredicciones = (estadisticasPredicciones["totalPredicciones"] as? Int) ?: 0,
+                    prediccionesEvaluadas = (estadisticasPredicciones["prediccionesEvaluadas"] as? Int) ?: 0,
+                    promedioAciertos = (estadisticasPredicciones["promedioAciertos"] as? Double) ?: 0.0,
+                    mejorAcierto = (estadisticasPredicciones["mejorAcierto"] as? Int) ?: 0,
+                    porcentajeConAciertos = (estadisticasPredicciones["porcentajeConAciertos"] as? Double) ?: 0.0,
+                    onVerHistorial = { /* TODO: Navegar al historial completo */ }
+                )
+            }
+        }
+
         // Estadísticas de números
         item {
             Spacer(modifier = Modifier.height(8.dp))
             EstadisticasCard(analisis = analisis, tipoLoteria = tipoLoteria)
         }
-        
+
         // Disclaimer final
         item {
             DisclaimerCard()
         }
-        
+
         // Espacio final
         item {
             Spacer(modifier = Modifier.height(16.dp))
@@ -375,7 +397,7 @@ private fun ResultadosContent(
 private fun InfoCard(
     analisis: AnalisisProbabilidad,
     rangoSeleccionado: OpcionRangoFechas,
-    metodoSeleccionado: MetodoCalculo,
+    prediccionesInfo: String = "",
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -389,11 +411,18 @@ private fun InfoCard(
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = "📊 ${metodoSeleccionado.displayName}",
+                text = "📊 Todos los Métodos (1 por cada uno)",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
+            if (prediccionesInfo.isNotEmpty()) {
+                Text(
+                    text = prediccionesInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Sorteos analizados: ${analisis.totalSorteos}",
@@ -428,36 +457,6 @@ private fun InfoCard(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun MetodoInfoCard(
-    metodo: MetodoCalculo,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp)
-        ) {
-            Text(
-                text = "🧮 ${metodo.explicacionCorta}",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = metodo.descripcion,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-            )
         }
     }
 }
@@ -758,3 +757,115 @@ private fun EmptyStateCard(
         }
     }
 }
+
+@Composable
+private fun EvaluacionCard(
+    historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
+    rankingMetodos: List<Triple<String, Double, Int>>,
+    modifier: Modifier = Modifier
+) {
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Rendimiento de Predicciones",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Último sorteo evaluado
+            val ultimo = historialEvaluado.firstOrNull()
+            if (ultimo != null) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (ultimo.mejorAciertos >= 3)
+                            Color(0xFF2E7D32).copy(alpha = 0.15f)
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Ultimo sorteo: ${ultimo.fechaSorteo}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Mejor: ${ultimo.mejorMetodo} (${ultimo.mejorAciertos} aciertos)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        // Mostrar todos los resultados del último sorteo
+                        ultimo.evaluaciones
+                            .sortedByDescending { it.aciertosNumeros }
+                            .take(5)
+                            .forEach { eval ->
+                                val emoji = when (eval.aciertosNumeros) {
+                                    0 -> "  "
+                                    1 -> "  "
+                                    2 -> "  "
+                                    3 -> "  "
+                                    else -> "  "
+                                }
+                                Text(
+                                    text = "$emoji${eval.metodo}: ${eval.aciertosNumeros} aciertos",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (eval.aciertosNumeros >= 3)
+                                        Color(0xFF2E7D32)
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                    }
+                }
+            }
+
+            // Ranking histórico de métodos
+            if (rankingMetodos.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Ranking historico (${historialEvaluado.size} sorteos)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                rankingMetodos.take(5).forEachIndexed { index, (metodo, promedio, mejor) ->
+                    val medalla = when (index) {
+                        0 -> "1."
+                        1 -> "2."
+                        2 -> "3."
+                        else -> "${index + 1}."
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "$medalla $metodo",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "${"%.1f".format(promedio)} media | $mejor max",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

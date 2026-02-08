@@ -76,6 +76,25 @@ fun PantallaBacktest(
     var servicioParaEsta by remember { mutableStateOf(AprendizajeService.isRunningFor(tipoLoteria.name)) }
     var ultimoProgreso by remember { mutableStateOf(-1) }
     
+    // Estado de entrenamiento rápido - sincronizar con servicio si ya está corriendo
+    var entrenamientoRapidoProgreso by remember {
+        mutableStateOf(
+            if (AprendizajeService.isRunning && AprendizajeService.modoRapido && AprendizajeService.isRunningFor(tipoLoteria.name))
+                AprendizajeService.iteracionActual.coerceAtLeast(0)
+            else -1
+        )
+    }
+    var entrenamientoRapidoTotal by remember {
+        mutableStateOf(if (AprendizajeService.isRunning && AprendizajeService.modoRapido) AprendizajeService.totalIteraciones else 0)
+    }
+    var entrenamientoRapidoResultado by remember { mutableStateOf("") }
+
+    // Opciones de entrenamiento
+    var numSorteosEntrenamiento by remember { mutableStateOf(150) }
+    var entrenarAbuelo by remember { mutableStateOf(true) }
+    var entrenarEnsemble by remember { mutableStateOf(true) }
+    var entrenarGenetico by remember { mutableStateOf(true) }
+
     // Optimización de batería
     var bateriaOptimizada by remember { mutableStateOf(!AprendizajeService.isIgnoringBatteryOptimizations(context)) }
     
@@ -98,46 +117,54 @@ fun PantallaBacktest(
             val nuevoParaEsta = AprendizajeService.isRunningFor(tipoLoteria.name)
             
             if (servicioParaEsta && !nuevoParaEsta) {
-                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                addLog("✅ APRENDIZAJE COMPLETADO")
-                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                
-                // Recargar estado de la IA
-                resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
-                resultados = persistencia.obtenerResultados(tipoLoteria.name)
-                
-                addLog("📈 RESULTADOS DEL APRENDIZAJE:")
-                addLog("   • Nivel: ${resumenIA.nombreNivel}")
-                addLog("   • Entrenamientos acumulados: ${resumenIA.totalEntrenamientos}")
-                addLog("   • Mejor puntuación histórica: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
-                
-                // Mostrar lo que ha aprendido con explicación
-                if (resumenIA.pesosCaracteristicas.isNotEmpty()) {
+                if (AprendizajeService.modoRapido) {
+                    // Entrenamiento rápido terminó
+                    entrenamientoRapidoProgreso = -2
+                    entrenamientoRapidoResultado = AprendizajeService.ultimoLog
+                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                    // Drenar logs finales
+                    val logsPendientes = AprendizajeService.obtenerLogsRapido()
+                    logsPendientes.forEach { addLog(it) }
+                } else {
                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    addLog("🧠 PESOS APRENDIDOS (qué prioriza la IA):")
-                    resumenIA.pesosCaracteristicas.entries
-                        .sortedByDescending { it.value }
-                        .take(5)
-                        .forEach { (nombre, peso) ->
-                            val porcentaje = (peso * 100).toInt()
-                            val barra = "█".repeat((porcentaje / 10).coerceIn(1, 10))
-                            addLog("   $barra $nombre: $porcentaje%")
-                        }
-                    addLog("   (Los pesos se usan en predicciones futuras)")
-                }
-                
-                if (resultados.isNotEmpty()) {
+                    addLog("✅ APRENDIZAJE COMPLETADO")
                     addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    addLog("🏆 RANKING DE MÉTODOS:")
-                    resultados.take(3).forEachIndexed { idx, r ->
-                        val emoji = when(idx) { 0 -> "🥇"; 1 -> "🥈"; else -> "🥉" }
-                        addLog("   $emoji ${r.metodo.displayName}: ${"%.2f".format(r.puntuacionTotal)} pts")
+
+                    resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                    resultados = persistencia.obtenerResultados(tipoLoteria.name)
+
+                    addLog("📈 RESULTADOS DEL APRENDIZAJE:")
+                    addLog("   • Nivel: ${resumenIA.nombreNivel}")
+                    addLog("   • Entrenamientos acumulados: ${resumenIA.totalEntrenamientos}")
+                    addLog("   • Mejor puntuación histórica: ${"%.2f".format(resumenIA.mejorPuntuacion)}")
+
+                    if (resumenIA.pesosCaracteristicas.isNotEmpty()) {
+                        addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        addLog("🧠 PESOS APRENDIDOS (qué prioriza la IA):")
+                        resumenIA.pesosCaracteristicas.entries
+                            .sortedByDescending { it.value }
+                            .take(5)
+                            .forEach { (nombre, peso) ->
+                                val porcentaje = (peso * 100).toInt()
+                                val barra = "█".repeat((porcentaje / 10).coerceIn(1, 10))
+                                addLog("   $barra $nombre: $porcentaje%")
+                            }
+                        addLog("   (Los pesos se usan en predicciones futuras)")
                     }
+
+                    if (resultados.isNotEmpty()) {
+                        addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        addLog("🏆 RANKING DE MÉTODOS:")
+                        resultados.take(3).forEachIndexed { idx, r ->
+                            val emoji = when(idx) { 0 -> "🥇"; 1 -> "🥈"; else -> "🥉" }
+                            addLog("   $emoji ${r.metodo.displayName}: ${"%.2f".format(r.puntuacionTotal)} pts")
+                        }
+                    }
+                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    addLog("💡 Las combinaciones sugeridas ahora")
+                    addLog("   usarán estos pesos aprendidos")
+                    addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 }
-                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                addLog("💡 Las combinaciones sugeridas ahora")
-                addLog("   usarán estos pesos aprendidos")
-                addLog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             }
             
             servicioActivo = AprendizajeService.isRunning
@@ -145,45 +172,50 @@ fun PantallaBacktest(
             bateriaOptimizada = !AprendizajeService.isIgnoringBatteryOptimizations(context)
             
             if (servicioParaEsta) {
-                val progreso = AprendizajeService.progreso
-                val iteracion = AprendizajeService.iteracionActual
-                val total = AprendizajeService.totalIteraciones
-                val mejorPunt = AprendizajeService.mejorPuntuacion
-                val metodoActual = AprendizajeService.metodoActual
-                val combActual = AprendizajeService.combinacionActual
-                val combTotal = AprendizajeService.totalCombinaciones
-                
-                // Loguear progreso general cada 10%
-                val debeLoguearProgreso = when {
-                    progreso == 100 && ultimoProgreso == 100 -> false
-                    progreso == 100 -> true
-                    progreso >= ultimoProgreso + 10 -> true
-                    else -> false
-                }
-                
-                if (debeLoguearProgreso) {
-                    ultimoProgreso = progreso
-                    val logMsg = StringBuilder("🔄 $progreso% - It. $iteracion/$total")
-                    if (mejorPunt > 0) {
-                        logMsg.append(" | Mejor: ${"%.1f".format(mejorPunt)}")
+                if (AprendizajeService.modoRapido) {
+                    // Entrenamiento rápido: actualizar progreso y drenar logs
+                    entrenamientoRapidoProgreso = AprendizajeService.iteracionActual
+                    entrenamientoRapidoTotal = AprendizajeService.totalIteraciones
+                    val logsNuevos = AprendizajeService.obtenerLogsRapido()
+                    logsNuevos.forEach { addLog(it) }
+                } else {
+                    val progreso = AprendizajeService.progreso
+                    val iteracion = AprendizajeService.iteracionActual
+                    val total = AprendizajeService.totalIteraciones
+                    val mejorPunt = AprendizajeService.mejorPuntuacion
+                    val metodoActual = AprendizajeService.metodoActual
+                    val combActual = AprendizajeService.combinacionActual
+                    val combTotal = AprendizajeService.totalCombinaciones
+
+                    val debeLoguearProgreso = when {
+                        progreso == 100 && ultimoProgreso == 100 -> false
+                        progreso == 100 -> true
+                        progreso >= ultimoProgreso + 10 -> true
+                        else -> false
                     }
-                    addLog(logMsg.toString())
-                }
-                
-                // Mostrar TODOS los métodos procesados desde la última lectura
-                val metodosRecientes = AprendizajeService.obtenerMetodosRecientes()
-                if (metodosRecientes.isNotEmpty()) {
-                    metodosRecientes.forEach { metodo ->
-                        addLog("   📊 $metodo | Comb: $combActual/$combTotal")
+
+                    if (debeLoguearProgreso) {
+                        ultimoProgreso = progreso
+                        val logMsg = StringBuilder("🔄 $progreso% - It. $iteracion/$total")
+                        if (mejorPunt > 0) {
+                            logMsg.append(" | Mejor: ${"%.1f".format(mejorPunt)}")
+                        }
+                        addLog(logMsg.toString())
                     }
-                    ultimoMetodoLogueado = metodosRecientes.last()
-                    ultimaCombLogueada = combActual
-                } else if (metodoActual.isNotEmpty() && combTotal > 0) {
-                    // Fallback: si no hay métodos recientes pero hay progreso
-                    val avance500 = combActual >= ultimaCombLogueada + 500
-                    if (avance500) {
+
+                    val metodosRecientes = AprendizajeService.obtenerMetodosRecientes()
+                    if (metodosRecientes.isNotEmpty()) {
+                        metodosRecientes.forEach { metodo ->
+                            addLog("   📊 $metodo | Comb: $combActual/$combTotal")
+                        }
+                        ultimoMetodoLogueado = metodosRecientes.last()
                         ultimaCombLogueada = combActual
-                        addLog("   📊 $metodoActual | Comb: $combActual/$combTotal")
+                    } else if (metodoActual.isNotEmpty() && combTotal > 0) {
+                        val avance500 = combActual >= ultimaCombLogueada + 500
+                        if (avance500) {
+                            ultimaCombLogueada = combActual
+                            addLog("   📊 $metodoActual | Comb: $combActual/$combTotal")
+                        }
                     }
                 }
             } else {
@@ -410,7 +442,7 @@ fun PantallaBacktest(
                         // Configuración del tamaño del pool
                         Text("🎯 Selectividad del pool", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(
-                            "Cuántos números top considerar de cada categoría",
+                            "De los 49 números, primero se eligen los N mejores candidatos de cada categoría (frecuentes, retrasados, tendencia, etc). Con menos números se es más preciso pero menos variado.",
                             fontSize = 10.sp,
                             color = Color.Gray
                         )
@@ -466,6 +498,137 @@ fun PantallaBacktest(
                 }
             }
             
+            // ==================== SECCIÓN 2B: ENTRENAMIENTO RÁPIDO IA ====================
+            if (tipoLoteria in listOf(TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO, TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA)) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.12f))) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("🧠 Entrenamiento Rápido IA", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Entrena los métodos con pesos ajustables usando sorteos reales y Adam optimizer.",
+                                fontSize = 11.sp, color = Color.Gray
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // ── Selector de sorteos ──
+                            Text("Sorteos:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(150, 250, 400).forEach { n ->
+                                    FilterChip(
+                                        selected = numSorteosEntrenamiento == n,
+                                        onClick = { numSorteosEntrenamiento = n },
+                                        label = { Text("$n") },
+                                        enabled = entrenamientoRapidoProgreso < 0
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // ── Checkboxes de métodos ──
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Checkbox(
+                                    checked = entrenarAbuelo,
+                                    onCheckedChange = { entrenarAbuelo = it },
+                                    enabled = entrenamientoRapidoProgreso < 0
+                                )
+                                Column {
+                                    Text("Método del Abuelo", fontSize = 13.sp)
+                                    Text("5 pesos algoritmo (Chi², Bayes, Fourier, Markov, Entropía)", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Checkbox(
+                                    checked = entrenarEnsemble,
+                                    onCheckedChange = { entrenarEnsemble = it },
+                                    enabled = entrenamientoRapidoProgreso < 0
+                                )
+                                Column {
+                                    Text("Ensemble Voting", fontSize = 13.sp)
+                                    Text("8 pesos de estrategia", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Checkbox(
+                                    checked = entrenarGenetico,
+                                    onCheckedChange = { entrenarGenetico = it },
+                                    enabled = entrenamientoRapidoProgreso < 0
+                                )
+                                Column {
+                                    Text("IA Genética", fontSize = 13.sp)
+                                    Text("10 pesos características (frecuencia, gap, tendencia...)", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            when {
+                                entrenamientoRapidoProgreso >= 0 -> {
+                                    // En progreso (servicio corriendo)
+                                    LinearProgressIndicator(
+                                        progress = if (entrenamientoRapidoTotal > 0) entrenamientoRapidoProgreso.toFloat() / entrenamientoRapidoTotal else 0f,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Entrenando $entrenamientoRapidoProgreso/$entrenamientoRapidoTotal...", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Puedes salir de la app, sigue en segundo plano", fontSize = 10.sp, color = Color(0xFF4CAF50))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = { AprendizajeService.stopLearning(context); entrenamientoRapidoProgreso = -1; addLog("⏹️ Detenido") },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Stop, null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Detener")
+                                    }
+                                }
+                                entrenamientoRapidoProgreso == -2 -> {
+                                    // Terminado
+                                    Text(entrenamientoRapidoResultado, fontSize = 12.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedButton(onClick = {
+                                        entrenamientoRapidoProgreso = 0
+                                        entrenamientoRapidoTotal = numSorteosEntrenamiento
+                                        AprendizajeService.startQuickTraining(
+                                            context, tipoLoteria.name, numSorteosEntrenamiento,
+                                            entrenarAbuelo, entrenarEnsemble, entrenarGenetico
+                                        )
+                                    }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Entrenar de nuevo")
+                                    }
+                                }
+                                else -> {
+                                    // Idle
+                                    val algunoSeleccionado = entrenarAbuelo || entrenarEnsemble || entrenarGenetico
+                                    Button(onClick = {
+                                        entrenamientoRapidoProgreso = 0
+                                        entrenamientoRapidoTotal = numSorteosEntrenamiento
+                                        AprendizajeService.startQuickTraining(
+                                            context, tipoLoteria.name, numSorteosEntrenamiento,
+                                            entrenarAbuelo, entrenarEnsemble, entrenarGenetico
+                                        )
+                                    }, modifier = Modifier.fillMaxWidth(), enabled = tamanoHistorico >= 150 && algunoSeleccionado && !servicioActivo) {
+                                        Text("▶️ Entrenar Seleccionados")
+                                    }
+                                    if (servicioActivo) {
+                                        Text("Otro proceso en curso, espera o detenlo", fontSize = 10.sp, color = Color(0xFFFF6600))
+                                    } else if (tamanoHistorico < 150) {
+                                        Text("Requiere al menos 150 sorteos", fontSize = 10.sp, color = Color(0xFFFF6600))
+                                    } else if (!algunoSeleccionado) {
+                                        Text("Selecciona al menos un método", fontSize = 10.sp, color = Color(0xFFFF6600))
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Funciona en segundo plano con la app cerrada", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ==================== SECCIÓN 3: LOG ====================
             item {
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D1A))) {
@@ -531,6 +694,11 @@ fun PantallaBacktest(
                             Text(leyenda, fontSize = 11.sp)
                         }
                     }
+                }
+
+                // ==================== SECCIÓN 5: VEREDICTO ====================
+                item {
+                    VeredictoMetodosCard(resultados = resultados)
                 }
             }
             
@@ -628,6 +796,125 @@ fun ResultadoBacktestCard(resultado: ResultadoBacktest, posicion: Int, tipoLoter
 }
 
 @Composable
+fun VeredictoMetodosCard(resultados: List<ResultadoBacktest>) {
+    val aleatorio = resultados.find { it.metodo == MetodoCalculo.ALEATORIO_PURO }
+    val referencia = aleatorio?.puntuacionTotal ?: resultados.minOfOrNull { it.puntuacionTotal } ?: return
+
+    val otros = resultados.filter { it.metodo != MetodoCalculo.ALEATORIO_PURO }
+    val funcionan = otros.filter { it.puntuacionTotal > referencia * 1.10 }.sortedByDescending { it.puntuacionTotal }
+    val normales = otros.filter { it.puntuacionTotal in (referencia * 0.90)..(referencia * 1.10) }.sortedByDescending { it.puntuacionTotal }
+    val noAportan = otros.filter { it.puntuacionTotal < referencia * 0.90 }.sortedByDescending { it.puntuacionTotal }
+
+    val maxPuntuacion = resultados.maxOf { it.puntuacionTotal }.coerceAtLeast(1.0)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("📋 VEREDICTO: ¿Qué métodos merecen la pena?", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Referencia: Aleatorio Puro = ${"%.2f".format(referencia)} pts",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // --- FUNCIONAN ---
+            if (funcionan.isNotEmpty()) {
+                Text("🏆 FUNCIONAN (superan al azar >10%)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF4CAF50))
+                Spacer(modifier = Modifier.height(4.dp))
+                funcionan.forEach { r ->
+                    val pct = ((r.puntuacionTotal - referencia) / referencia * 100).toInt()
+                    VeredictoMetodoRow(r.metodo.displayName, r.puntuacionTotal, pct, maxPuntuacion, Color(0xFF4CAF50))
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // --- NORMALES ---
+            if (normales.isNotEmpty()) {
+                Text("😐 NORMALES (±10% del azar)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF9E9E9E))
+                Spacer(modifier = Modifier.height(4.dp))
+                normales.forEach { r ->
+                    val pct = ((r.puntuacionTotal - referencia) / referencia * 100).toInt()
+                    VeredictoMetodoRow(r.metodo.displayName, r.puntuacionTotal, pct, maxPuntuacion, Color(0xFF9E9E9E))
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // --- NO APORTAN ---
+            if (noAportan.isNotEmpty()) {
+                Text("🗑️ NO APORTAN (peor que azar >10%)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE57373))
+                Spacer(modifier = Modifier.height(4.dp))
+                noAportan.forEach { r ->
+                    val pct = ((r.puntuacionTotal - referencia) / referencia * 100).toInt()
+                    VeredictoMetodoRow(r.metodo.displayName, r.puntuacionTotal, pct, maxPuntuacion, Color(0xFFE57373))
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // --- CONCLUSIÓN ---
+            Divider(color = Color.Gray.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(8.dp))
+            val totalMetodos = otros.size
+            Text(
+                "💡 Solo ${funcionan.size} de $totalMetodos métodos superan al azar.",
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+            )
+            if (funcionan.isNotEmpty()) {
+                val nombres = funcionan.take(3).joinToString(", ") { it.metodo.displayName }
+                Text(
+                    "Recomendación: usar $nombres.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VeredictoMetodoRow(
+    nombre: String,
+    puntuacion: Double,
+    porcentaje: Int,
+    maxPuntuacion: Double,
+    color: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(nombre, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Text(
+            "${"%.1f".format(puntuacion)} pts",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(60.dp),
+            textAlign = TextAlign.End
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            "${if (porcentaje >= 0) "+" else ""}$porcentaje%",
+            fontSize = 11.sp,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(42.dp),
+            textAlign = TextAlign.End
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        LinearProgressIndicator(
+            progress = (puntuacion / maxPuntuacion).toFloat().coerceIn(0f, 1f),
+            modifier = Modifier.weight(1f).height(8.dp),
+            color = color,
+            trackColor = color.copy(alpha = 0.15f)
+        )
+    }
+}
+
+@Composable
 fun AciertoChipConTick(label: String, count: Int, color: Color, mostrarTick: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, fontSize = 9.sp, color = Color.Gray)
@@ -642,3 +929,4 @@ fun AciertoChipConTick(label: String, count: Int, color: Color, mostrarTick: Boo
         }
     }
 }
+

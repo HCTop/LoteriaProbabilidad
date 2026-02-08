@@ -12,30 +12,36 @@ import androidx.core.app.NotificationCompat
 import com.loteria.probabilidad.MainActivity
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
+import com.loteria.probabilidad.domain.ml.HistorialPredicciones
+import com.loteria.probabilidad.domain.ml.MatematicasAbuelo
 import com.loteria.probabilidad.domain.ml.MemoriaIA
+import com.loteria.probabilidad.domain.ml.MotorInteligencia
 import kotlinx.coroutines.*
 
 /**
- * Servicio de aprendizaje en segundo plano v3.
- * - Solicita desactivar optimización de batería
- * - WakeLock agresivo
- * - Notificación de máxima prioridad
- * - Continúa al cerrar la app
+ * Servicio de aprendizaje en segundo plano v4.
+ * Soporta dos modos:
+ * - Backtesting clásico (ACTION_START): iteraciones x sorteos x 9 métodos
+ * - Entrenamiento rápido IA (ACTION_START_RAPIDO): entrena pesos de Abuelo/Ensemble/Genético
  */
 class AprendizajeService : Service() {
-    
+
     companion object {
         const val CHANNEL_ID = "aprendizaje_ia_channel"
         const val NOTIFICATION_ID = 1001
-        
+
         const val ACTION_START = "com.loteria.probabilidad.START_LEARNING"
+        const val ACTION_START_RAPIDO = "com.loteria.probabilidad.START_RAPIDO"
         const val ACTION_STOP = "com.loteria.probabilidad.STOP_LEARNING"
-        
+
         const val EXTRA_TIPO_LOTERIA = "tipo_loteria"
         const val EXTRA_SORTEOS = "sorteos"
         const val EXTRA_ITERACIONES = "iteraciones"
         const val EXTRA_OPEN_BACKTESTING = "open_backtesting"
-        
+        const val EXTRA_ENTRENAR_ABUELO = "entrenar_abuelo"
+        const val EXTRA_ENTRENAR_ENSEMBLE = "entrenar_ensemble"
+        const val EXTRA_ENTRENAR_GENETICO = "entrenar_genetico"
+
         @Volatile var isRunning = false
         @Volatile var progreso = 0
         @Volatile var iteracionActual = 0
@@ -45,27 +51,45 @@ class AprendizajeService : Service() {
         @Volatile var tipoLoteriaActual = ""
         @Volatile var mejorPuntuacion = 0.0
         @Volatile var ultimaActualizacion = System.currentTimeMillis()
-        
+        @Volatile var modoRapido = false
+
         // Contadores de combinaciones
         @Volatile var combinacionActual = 0
         @Volatile var totalCombinaciones = 0
         @Volatile var metodoActual = ""
-        
+
+        // Logs del entrenamiento rápido (la UI los lee y vacía)
+        val logsRapido = mutableListOf<String>()
+
+        fun agregarLogRapido(msg: String) {
+            synchronized(logsRapido) {
+                logsRapido.add(msg)
+                while (logsRapido.size > 100) logsRapido.removeAt(0)
+            }
+        }
+
+        fun obtenerLogsRapido(): List<String> {
+            synchronized(logsRapido) {
+                val copia = logsRapido.toList()
+                logsRapido.clear()
+                return copia
+            }
+        }
+
         // Lista de últimos métodos procesados (para el log)
         val metodosRecientes = mutableListOf<String>()
-        
+
         fun agregarMetodoProcesado(metodo: String) {
             synchronized(metodosRecientes) {
                 if (metodosRecientes.lastOrNull() != metodo) {
                     metodosRecientes.add(metodo)
-                    // Mantener solo los últimos 20
                     while (metodosRecientes.size > 20) {
                         metodosRecientes.removeAt(0)
                     }
                 }
             }
         }
-        
+
         fun obtenerMetodosRecientes(): List<String> {
             synchronized(metodosRecientes) {
                 val copia = metodosRecientes.toList()
@@ -73,18 +97,16 @@ class AprendizajeService : Service() {
                 return copia
             }
         }
-        
+
         fun isRunningFor(tipoLoteria: String): Boolean {
             return isRunning && tipoLoteriaActual == tipoLoteria
         }
-        
-        /** Verifica si la app está exenta de optimización de batería */
+
         fun isIgnoringBatteryOptimizations(context: Context): Boolean {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             return pm.isIgnoringBatteryOptimizations(context.packageName)
         }
-        
-        /** Solicita al usuario desactivar la optimización de batería */
+
         fun requestIgnoreBatteryOptimizations(context: Context) {
             if (!isIgnoringBatteryOptimizations(context)) {
                 try {
@@ -102,9 +124,8 @@ class AprendizajeService : Service() {
                 }
             }
         }
-        
+
         fun startLearning(context: Context, tipoLoteria: String, sorteos: Int, iteraciones: Int) {
-            // Resetear todas las variables al iniciar nuevo aprendizaje
             tipoLoteriaActual = tipoLoteria
             mejorPuntuacion = 0.0
             progreso = 0
@@ -112,15 +133,13 @@ class AprendizajeService : Service() {
             totalIteraciones = iteraciones
             entrenamientosCompletados = 0
             ultimoLog = ""
-            
-            // Resetear contadores de combinaciones
+            modoRapido = false
+
             combinacionActual = 0
-            totalCombinaciones = 9 * sorteos * iteraciones  // 9 métodos x sorteos x iteraciones
+            totalCombinaciones = 9 * sorteos * iteraciones
             metodoActual = ""
-            synchronized(metodosRecientes) {
-                metodosRecientes.clear()
-            }
-            
+            synchronized(metodosRecientes) { metodosRecientes.clear() }
+
             val intent = Intent(context, AprendizajeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
@@ -133,46 +152,90 @@ class AprendizajeService : Service() {
                 context.startService(intent)
             }
         }
-        
+
+        fun startQuickTraining(
+            context: Context, tipoLoteria: String, numSorteos: Int,
+            entrenarAbuelo: Boolean, entrenarEnsemble: Boolean, entrenarGenetico: Boolean
+        ) {
+            tipoLoteriaActual = tipoLoteria
+            mejorPuntuacion = 0.0
+            progreso = 0
+            iteracionActual = 0
+            totalIteraciones = numSorteos
+            entrenamientosCompletados = 0
+            ultimoLog = ""
+            modoRapido = true
+            combinacionActual = 0
+            totalCombinaciones = numSorteos
+            metodoActual = ""
+            synchronized(logsRapido) { logsRapido.clear() }
+
+            val intent = Intent(context, AprendizajeService::class.java).apply {
+                action = ACTION_START_RAPIDO
+                putExtra(EXTRA_TIPO_LOTERIA, tipoLoteria)
+                putExtra(EXTRA_SORTEOS, numSorteos)
+                putExtra(EXTRA_ENTRENAR_ABUELO, entrenarAbuelo)
+                putExtra(EXTRA_ENTRENAR_ENSEMBLE, entrenarEnsemble)
+                putExtra(EXTRA_ENTRENAR_GENETICO, entrenarGenetico)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
         fun stopLearning(context: Context) {
             isRunning = false
             context.startService(Intent(context, AprendizajeService::class.java).apply { action = ACTION_STOP })
         }
     }
-    
+
     private var wakeLock: PowerManager.WakeLock? = null
     private var job: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
                 val tipoLoteria = intent.getStringExtra(EXTRA_TIPO_LOTERIA) ?: "PRIMITIVA"
                 val sorteos = intent.getIntExtra(EXTRA_SORTEOS, 50)
                 val iteraciones = intent.getIntExtra(EXTRA_ITERACIONES, 30)
-                
+
                 startForeground(NOTIFICATION_ID, createNotification("Preparando...", 0))
                 acquireWakeLock()
                 startLearningProcess(tipoLoteria, sorteos, iteraciones)
+            }
+            ACTION_START_RAPIDO -> {
+                val tipoLoteria = intent.getStringExtra(EXTRA_TIPO_LOTERIA) ?: "PRIMITIVA"
+                val numSorteos = intent.getIntExtra(EXTRA_SORTEOS, 150)
+                val entrenarAbuelo = intent.getBooleanExtra(EXTRA_ENTRENAR_ABUELO, true)
+                val entrenarEnsemble = intent.getBooleanExtra(EXTRA_ENTRENAR_ENSEMBLE, true)
+                val entrenarGenetico = intent.getBooleanExtra(EXTRA_ENTRENAR_GENETICO, true)
+
+                startForeground(NOTIFICATION_ID, createNotification("Preparando entrenamiento rápido...", 0))
+                acquireWakeLock()
+                startQuickTrainingProcess(tipoLoteria, numSorteos, entrenarAbuelo, entrenarEnsemble, entrenarGenetico)
             }
             ACTION_STOP -> stopLearningProcess()
         }
         return START_STICKY
     }
-    
+
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // El servicio continúa cuando el usuario cierra la app
     }
-    
+
+    // ==================== BACKTESTING CLÁSICO ====================
+
     private fun startLearningProcess(tipoLoteria: String, sorteos: Int, iteraciones: Int) {
         job?.cancel()
-        
+
         isRunning = true
         progreso = 0
         iteracionActual = 0
@@ -180,26 +243,24 @@ class AprendizajeService : Service() {
         entrenamientosCompletados = 0
         mejorPuntuacion = 0.0
         tipoLoteriaActual = tipoLoteria
-        
+
         job = serviceScope.launch {
             try {
                 val calculador = CalculadorProbabilidad(this@AprendizajeService)
                 val memoriaIA = MemoriaIA(this@AprendizajeService)
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
                 val persistencia = com.loteria.probabilidad.domain.ml.BacktestPersistencia(this@AprendizajeService)
-                
-                // Callback para actualizar progreso de combinaciones
-                val combsPorIteracion = sorteos * 9 * 5  // sorteos * métodos * combinaciones
+
+                val combsPorIteracion = sorteos * 9 * 5
                 calculador.onProgresoBacktest = { metodo, comb, total ->
                     metodoActual = metodo
-                    agregarMetodoProcesado(metodo) // Registrar para el log
-                    // Hacer acumulativo: combinaciones de iteraciones anteriores + actual
+                    agregarMetodoProcesado(metodo)
                     combinacionActual = ((iteracionActual - 1).coerceAtLeast(0)) * combsPorIteracion + comb
                     totalCombinaciones = combsPorIteracion * iteraciones
                 }
-                
+
                 updateNotification("Cargando $tipoLoteria...", 0)
-                
+
                 val historicoPrecargado: Any = when (tipoLoteria) {
                     "PRIMITIVA" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA)
                     "BONOLOTO" -> dataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO)
@@ -210,52 +271,48 @@ class AprendizajeService : Service() {
                     "NINO" -> dataSource.leerHistoricoNacional(TipoLoteria.NINO)
                     else -> emptyList<Any>()
                 }
-                
-                // Mapa para acumular los MEJORES resultados por método de TODAS las iteraciones
+
                 val mejoresResultadosPorMetodo = mutableMapOf<MetodoCalculo, ResultadoBacktest>()
-                
+
                 for (i in 1..iteraciones) {
                     if (!isRunning) break
-                    
+
                     iteracionActual = i
                     progreso = ((i.toFloat() / iteraciones) * 100).toInt()
                     ultimaActualizacion = System.currentTimeMillis()
-                    
+
                     val resultados = ejecutarIteracion(tipoLoteria, calculador, memoriaIA, historicoPrecargado, sorteos)
-                    
-                    // Actualizar mejores resultados por método
+
                     for (resultado in resultados) {
                         val mejorPrevio = mejoresResultadosPorMetodo[resultado.metodo]
                         if (mejorPrevio == null || resultado.puntuacionTotal > mejorPrevio.puntuacionTotal) {
                             mejoresResultadosPorMetodo[resultado.metodo] = resultado
                         }
                     }
-                    
-                    // Actualizar mejor puntuación global
+
                     val mejorActualIteracion = resultados.maxOfOrNull { it.puntuacionTotal } ?: 0.0
                     val mejorGlobal = mejoresResultadosPorMetodo.values.maxOfOrNull { it.puntuacionTotal } ?: 0.0
                     mejorPuntuacion = mejorGlobal
-                    
+
                     entrenamientosCompletados++
                     ultimoLog = "It. $i: Mejor=${String.format("%.1f", mejorPuntuacion)}"
-                    
+
                     updateNotification("$tipoLoteria: $i/$iteraciones", progreso)
-                    
+
                     yield()
                 }
-                
-                // Al finalizar, guardar los MEJORES resultados acumulados de todas las iteraciones
+
                 if (isRunning && mejoresResultadosPorMetodo.isNotEmpty()) {
                     val mejoresOrdenados = mejoresResultadosPorMetodo.values
                         .sortedByDescending { it.puntuacionTotal }
                     persistencia.guardarResultados(tipoLoteria, mejoresOrdenados)
-                    
+
                     progreso = 100
                     ultimoLog = "✅ Completado: $iteraciones iteraciones"
                     updateNotification("✅ $tipoLoteria: Completado", 100)
                     delay(3000)
                 }
-                
+
             } catch (e: CancellationException) {
                 ultimoLog = "⏹️ Detenido"
             } catch (e: Exception) {
@@ -265,10 +322,10 @@ class AprendizajeService : Service() {
             }
         }
     }
-    
+
     @Suppress("UNCHECKED_CAST")
     private suspend fun ejecutarIteracion(
-        tipoLoteria: String, calculador: CalculadorProbabilidad, 
+        tipoLoteria: String, calculador: CalculadorProbabilidad,
         memoriaIA: MemoriaIA, historicoPrecargado: Any, sorteos: Int
     ): List<ResultadoBacktest> = withContext(Dispatchers.Default) {
         when (tipoLoteria) {
@@ -299,7 +356,7 @@ class AprendizajeService : Service() {
             "NAVIDAD" -> {
                 val historico = historicoPrecargado as List<ResultadoNavidad>
                 val results = calculador.ejecutarBacktestNavidad(historico, sorteos)
-                calculador.aprenderDeBacktest(results, historico.map { 
+                calculador.aprenderDeBacktest(results, historico.map {
                     val gordo = it.gordo.filter { c -> c.isDigit() }.takeLast(5).padStart(5, '0')
                     convertirNumeroATerminaciones(gordo, it.fecha, it.reintegros)
                 }, tipoLoteria, sorteos)
@@ -314,12 +371,244 @@ class AprendizajeService : Service() {
             else -> emptyList()
         }
     }
-    
+
+    // ==================== ENTRENAMIENTO RÁPIDO IA ====================
+
+    private fun startQuickTrainingProcess(
+        tipoLoteria: String, numSorteos: Int,
+        entrenarAbuelo: Boolean, entrenarEnsemble: Boolean, entrenarGenetico: Boolean
+    ) {
+        job?.cancel()
+
+        isRunning = true
+        modoRapido = true
+        progreso = 0
+        iteracionActual = 0
+        entrenamientosCompletados = 0
+        tipoLoteriaActual = tipoLoteria
+
+        val metodos = mutableListOf<String>()
+        if (entrenarAbuelo) metodos.add("Abuelo")
+        if (entrenarEnsemble) metodos.add("Ensemble")
+        if (entrenarGenetico) metodos.add("Genético")
+        agregarLogRapido("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        agregarLogRapido("🧠 ENTRENAMIENTO RÁPIDO IA")
+        agregarLogRapido("   Sorteos: $numSorteos | Métodos: ${metodos.joinToString(", ")}")
+        agregarLogRapido("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        job = serviceScope.launch {
+            try {
+                val memoriaIA = MemoriaIA(this@AprendizajeService)
+                val motorIA = MotorInteligencia(this@AprendizajeService)
+                val matematicas = MatematicasAbuelo()
+                val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
+                val historialPredicciones = HistorialPredicciones(this@AprendizajeService)
+
+                updateNotification("Cargando $tipoLoteria...", 0)
+
+                val (historicoPrim, maxNumero, cantidadNumeros) = when (tipoLoteria) {
+                    "PRIMITIVA" -> Triple(dataSource.leerHistoricoPrimitiva(TipoLoteria.PRIMITIVA), 49, 6)
+                    "BONOLOTO" -> Triple(dataSource.leerHistoricoPrimitiva(TipoLoteria.BONOLOTO), 49, 6)
+                    "EUROMILLONES" -> {
+                        val h = dataSource.leerHistoricoEuromillones()
+                        Triple(h.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, 50, 5)
+                    }
+                    "GORDO_PRIMITIVA" -> {
+                        val h = dataSource.leerHistoricoGordoPrimitiva()
+                        Triple(h.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, 54, 5)
+                    }
+                    else -> {
+                        agregarLogRapido("❌ No disponible para esta lotería")
+                        ultimoLog = "No disponible"
+                        progreso = 100
+                        updateNotification("❌ No disponible", 100)
+                        delay(2000)
+                        finishService()
+                        return@launch
+                    }
+                }
+
+                if (historicoPrim.size < 150) {
+                    agregarLogRapido("❌ Histórico insuficiente (mín 150, tiene ${historicoPrim.size})")
+                    ultimoLog = "Histórico insuficiente"
+                    progreso = 100
+                    updateNotification("❌ Histórico insuficiente", 100)
+                    delay(2000)
+                    finishService()
+                    return@launch
+                }
+
+                val efectivo = numSorteos.coerceAtMost(historicoPrim.size - 100)
+                totalIteraciones = efectivo
+                val sorteosAEvaluar = historicoPrim.take(efectivo).reversed()
+
+                var entrenamientos = 0
+                val distAbuelo = mutableMapOf<Int, Int>()
+                val distEnsemble = mutableMapOf<Int, Int>()
+                val distGenetico = mutableMapOf<Int, Int>()
+
+                for ((idx, sorteo) in sorteosAEvaluar.withIndex()) {
+                    if (!isRunning) break
+
+                    iteracionActual = idx + 1
+                    progreso = ((idx + 1).toFloat() / efectivo * 100).toInt()
+                    ultimaActualizacion = System.currentTimeMillis()
+
+                    val pos = historicoPrim.indexOf(sorteo)
+                    val historicoAnterior = historicoPrim.subList(
+                        pos + 1, (pos + 500).coerceAtMost(historicoPrim.size)
+                    )
+                    if (historicoAnterior.size < 100) continue
+
+                    val numerosReales = sorteo.numeros.toSet()
+
+                    // ══════ ABUELO ══════
+                    if (entrenarAbuelo) {
+                        val (_, chiResultados) = matematicas.testChiCuadradoGlobal(historicoAnterior, maxNumero, cantidadNumeros)
+                        val bayesianos = matematicas.inferenciaBayesiana(historicoAnterior, maxNumero, cantidadNumeros)
+                        val fourier = matematicas.analizarFourier(historicoAnterior, maxNumero)
+                        val markov = matematicas.analizarMarkov(historicoAnterior, maxNumero)
+                        val entropia = matematicas.calcularEntropia(historicoAnterior, maxNumero)
+
+                        val topChi = chiResultados.filter { it.sesgo > 0 }.sortedByDescending { it.sesgo }.take(10).map { it.numero }
+                        val topBayes = bayesianos.entries.sortedByDescending { it.value.posteriorMedia }.take(10).map { it.key }
+                        val topFourier = if (fourier.isNotEmpty()) {
+                            fourier.entries.sortedByDescending { entry ->
+                                val comp = entry.value
+                                if (comp.confianzaPeriodicidad > 0.3) {
+                                    (1.0 - (comp.prediccionProximaSalida.toDouble() / comp.periodoDominante.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)) * comp.confianzaPeriodicidad
+                                } else 0.0
+                            }.take(10).map { it.key }
+                        } else (1..maxNumero).shuffled().take(10)
+                        val topMarkov = if (markov.isNotEmpty()) markov.entries.sortedByDescending { it.value.prediccionProximoSorteo }.take(10).map { it.key }
+                        else (1..maxNumero).shuffled().take(10)
+                        val topEntropia = entropia.numerosConcentrados.take(10)
+
+                        val contribuciones = mapOf(
+                            "chiCuadrado" to topChi.count { it in numerosReales }.toDouble(),
+                            "bayesiano" to topBayes.count { it in numerosReales }.toDouble(),
+                            "fourier" to topFourier.count { it in numerosReales }.toDouble(),
+                            "markov" to topMarkov.count { it in numerosReales }.toDouble(),
+                            "entropia" to topEntropia.count { it in numerosReales }.toDouble()
+                        )
+
+                        val pesosActuales = memoriaIA.obtenerPesosAbuelo(tipoLoteria)
+                        val tops = mapOf("chiCuadrado" to topChi, "bayesiano" to topBayes, "fourier" to topFourier, "markov" to topMarkov, "entropia" to topEntropia)
+                        val scoresPorNumero = (1..maxNumero).associateWith { num ->
+                            var score = 0.0
+                            for ((alg, topList) in tops) {
+                                val posicion = topList.indexOf(num)
+                                if (posicion >= 0) score += (10 - posicion) * (pesosActuales[alg] ?: 0.2)
+                            }
+                            score
+                        }
+                        val prediccion = scoresPorNumero.entries.sortedByDescending { it.value }.take(cantidadNumeros).map { it.key }
+                        val aciertosAbuelo = prediccion.count { it in numerosReales }
+                        distAbuelo[aciertosAbuelo] = (distAbuelo[aciertosAbuelo] ?: 0) + 1
+                        memoriaIA.actualizarPesosAbuelo(contribuciones, aciertosAbuelo, tipoLoteria)
+                    }
+
+                    // ══════ ENSEMBLE ══════
+                    if (entrenarEnsemble) {
+                        try {
+                            val resultado = motorIA.ejecutarEnsembleVoting(historicoAnterior, maxNumero, cantidadNumeros, tipoLoteria)
+                            motorIA.registrarResultadoEnsemble(sorteo.numeros, resultado, tipoLoteria)
+                            val aciertosEns = resultado.combinacionGanadora.count { it in numerosReales }
+                            distEnsemble[aciertosEns] = (distEnsemble[aciertosEns] ?: 0) + 1
+                        } catch (_: Exception) { }
+                    }
+
+                    // ══════ GENÉTICO ══════
+                    if (entrenarGenetico) {
+                        try {
+                            motorIA.generarCombinacionesInteligentes(historicoAnterior, maxNumero, cantidadNumeros, 1, tipoLoteria)
+                            val contribuciones = motorIA.getContribuciones()
+                            val mejorPunt = memoriaIA.obtenerMejorPuntuacion(tipoLoteria)
+                            val combinacion = motorIA.generarCombinacionesInteligentes(historicoAnterior, maxNumero, cantidadNumeros, 1, tipoLoteria)
+                                .firstOrNull()?.numeros ?: emptyList()
+                            val aciertosGen = combinacion.count { it in numerosReales }
+                            val puntuacion = aciertosGen.toDouble()
+                            distGenetico[aciertosGen] = (distGenetico[aciertosGen] ?: 0) + 1
+                            memoriaIA.actualizarPesos(contribuciones, puntuacion, mejorPunt, tipoLoteria)
+                        } catch (_: Exception) { }
+                    }
+
+                    entrenamientos++
+                    entrenamientosCompletados = entrenamientos
+
+                    // Log cada 25 sorteos
+                    if ((idx + 1) % 25 == 0) {
+                        val parts = mutableListOf<String>()
+                        if (entrenarAbuelo) {
+                            val pesosNow = memoriaIA.obtenerPesosAbuelo(tipoLoteria)
+                            parts.add("Abuelo[${pesosNow.entries.joinToString(" ") { "${it.key.take(3)}=${"%.0f".format(it.value * 100)}%" }}]")
+                        }
+                        if (entrenarEnsemble) parts.add("Ens✓")
+                        if (entrenarGenetico) parts.add("Gen✓")
+                        agregarLogRapido("   📊 ${idx + 1}/$efectivo - ${parts.joinToString(" | ")}")
+                    }
+
+                    updateNotification("Entrenando $tipoLoteria: ${idx + 1}/$efectivo", progreso)
+                    yield()
+                }
+
+                if (!isRunning) {
+                    agregarLogRapido("⏹️ Detenido por el usuario")
+                    ultimoLog = "⏹️ Detenido"
+                    finishService()
+                    return@launch
+                }
+
+                // ── Resumen final ──
+                if (entrenarAbuelo) {
+                    val pesosFinales = memoriaIA.obtenerPesosAbuelo(tipoLoteria)
+                    val resumen = pesosFinales.entries.joinToString(", ") { "${it.key}=${"%.0f".format(it.value * 100)}%" }
+                    val distStr = distAbuelo.entries.sortedBy { it.key }.joinToString(", ") { "${it.key}ac:${it.value}x" }
+                    agregarLogRapido("   🔬 Abuelo: $distStr")
+                    agregarLogRapido("   Pesos: $resumen")
+                }
+                if (entrenarEnsemble) {
+                    val distStr = distEnsemble.entries.sortedBy { it.key }.joinToString(", ") { "${it.key}ac:${it.value}x" }
+                    agregarLogRapido("   🗳️ Ensemble: $distStr")
+                }
+                if (entrenarGenetico) {
+                    val distStr = distGenetico.entries.sortedBy { it.key }.joinToString(", ") { "${it.key}ac:${it.value}x" }
+                    agregarLogRapido("   🧬 Genético: $distStr")
+                }
+
+                // Invalidar predicciones cacheadas
+                val proximoSorteo = historialPredicciones.proximoSorteo(tipoLoteria)
+                historialPredicciones.eliminarPredicciones(tipoLoteria, proximoSorteo.toString())
+                agregarLogRapido("🔄 Predicciones invalidadas - se regenerarán con los nuevos pesos")
+
+                agregarLogRapido("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                agregarLogRapido("✅ ENTRENAMIENTO COMPLETADO: $entrenamientos sorteos")
+                agregarLogRapido("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                progreso = 100
+                ultimoLog = "✅ $entrenamientos sorteos entrenados"
+                updateNotification("✅ $tipoLoteria: Entrenamiento completado", 100)
+                delay(3000)
+
+            } catch (e: CancellationException) {
+                agregarLogRapido("⏹️ Detenido")
+                ultimoLog = "⏹️ Detenido"
+            } catch (e: Exception) {
+                agregarLogRapido("❌ Error: ${e.message}")
+                ultimoLog = "❌ Error: ${e.message}"
+            } finally {
+                finishService()
+            }
+        }
+    }
+
+    // ==================== UTILIDADES ====================
+
     private fun convertirNacionalATerminaciones(nac: ResultadoNacional): ResultadoPrimitiva {
         val num = nac.primerPremio.filter { it.isDigit() }.takeLast(5).padStart(5, '0')
         return convertirNumeroATerminaciones(num, nac.fecha, nac.reintegros)
     }
-    
+
     private fun convertirNumeroATerminaciones(numero: String, fecha: String, reintegros: List<Int>): ResultadoPrimitiva {
         val term2 = numero.takeLast(2).toIntOrNull() ?: 0
         val term1 = (numero.takeLast(1).toIntOrNull() ?: 0) + 1
@@ -329,20 +618,20 @@ class AprendizajeService : Service() {
         val reint = reintegros.firstOrNull()?.plus(41) ?: 41
         return ResultadoPrimitiva(fecha, listOf(term2, term1, decena, centena, millar, reint).map { it.coerceIn(1, 49) }, 0, reintegros.firstOrNull() ?: 0)
     }
-    
+
     private fun stopLearningProcess() {
         isRunning = false
         job?.cancel()
         finishService()
     }
-    
+
     private fun finishService() {
         isRunning = false
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
-    
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(CHANNEL_ID, "Aprendizaje IA", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -353,25 +642,27 @@ class AprendizajeService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
-    
+
     private fun createNotification(text: String, progress: Int): Notification {
-        val stopPendingIntent = PendingIntent.getService(this, 0, 
+        val stopPendingIntent = PendingIntent.getService(this, 0,
             Intent(this, AprendizajeService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        
+
         val openPendingIntent = PendingIntent.getActivity(this, 1,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_OPEN_BACKTESTING, true)
                 putExtra(EXTRA_TIPO_LOTERIA, tipoLoteriaActual)
             }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        
+
+        val prefix = if (modoRapido) "🧬" else "🧠"
         val titulo = when {
             progress >= 100 -> "✅ Completado"
-            progress > 0 -> "🧠 $progress% - It. $iteracionActual/$totalIteraciones"
-            else -> "🧠 Iniciando..."
+            progress > 0 -> if (modoRapido) "$prefix $progress% - $iteracionActual/$totalIteraciones sorteos"
+                            else "$prefix $progress% - It. $iteracionActual/$totalIteraciones"
+            else -> "$prefix Iniciando..."
         }
-        
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(titulo)
             .setContentText(text)
@@ -386,11 +677,11 @@ class AprendizajeService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
-    
+
     private fun updateNotification(text: String, progress: Int) {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(text, progress))
     }
-    
+
     private fun acquireWakeLock() {
         if (wakeLock == null) {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
@@ -398,14 +689,14 @@ class AprendizajeService : Service() {
                 .apply { setReferenceCounted(false); acquire() }
         }
     }
-    
+
     private fun releaseWakeLock() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
-    
+
     override fun onBind(intent: Intent?): IBinder? = null
-    
+
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false

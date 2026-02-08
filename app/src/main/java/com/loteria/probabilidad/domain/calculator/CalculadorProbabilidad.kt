@@ -115,14 +115,65 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         // Calcular frecuencias
         val frecuenciasNumeros = contarFrecuencias(historico.flatMap { it.numeros }, 1..maxNumero)
         val frecuenciasReintegros = contarFrecuencias(historico.map { it.reintegro }, 0..9)
-        
-        // Obtener reintegros ordenados por frecuencia para variar entre combinaciones
-        val reintegrosOrdenados = frecuenciasReintegros.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
+
+        // MEJORA 10: Predicción inteligente de reintegros
+        val reintegrosPredichos = if (historico.isNotEmpty()) {
+            motorIA.predecirReintegros(historico, numCombinaciones).map { it.numero }
+        } else {
+            (0..9).shuffled().take(numCombinaciones)
+        }
         
         // Generar combinaciones según el método
         val combinacionesBase = when (metodo) {
+            MetodoCalculo.ENSEMBLE_VOTING -> {
+                // MEJORA 9: Sistema de votación con 8 estrategias
+                val resultado = motorIA.ejecutarEnsembleVoting(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
+                val combinaciones = mutableListOf(motorIA.generarCombinacionEnsemble(historico, maxNumero, cantidadNumeros, tipoLoteria.name))
+                // Añadir alternativas si hay
+                resultado.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt ->
+                    combinaciones.add(CombinacionSugerida(
+                        numeros = alt,
+                        probabilidadRelativa = resultado.confianzaGlobal * 90,
+                        explicacion = "🗳️ Alternativa Ensemble"
+                    ))
+                }
+                // Completar con genético si faltan
+                while (combinaciones.size < numCombinaciones) {
+                    combinaciones.addAll(motorIA.generarCombinacionesInteligentes(
+                        historico, maxNumero, cantidadNumeros, 1, tipoLoteria.name
+                    ))
+                }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.ALTA_CONFIANZA -> {
+                // MEJORA 7: Sistema de 7 señales coherentes de alta confianza
+                val prediccion = motorIA.generarPrediccionAltaConfianza(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
+                val combinaciones = mutableListOf(CombinacionSugerida(
+                    numeros = prediccion.combinacionPrincipal,
+                    probabilidadRelativa = prediccion.confianzaGlobal * 100,
+                    explicacion = "🎯 Alta Confianza | ${prediccion.numerosConAltoConsenso.size} números con ≥4/7 señales"
+                ))
+                prediccion.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt ->
+                    combinaciones.add(CombinacionSugerida(
+                        numeros = alt,
+                        probabilidadRelativa = prediccion.confianzaGlobal * 85,
+                        explicacion = "🎯 Alternativa Alta Confianza"
+                    ))
+                }
+                while (combinaciones.size < numCombinaciones) {
+                    combinaciones.addAll(motorIA.generarCombinacionesInteligentes(
+                        historico, maxNumero, cantidadNumeros, 1, tipoLoteria.name
+                    ))
+                }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.RACHAS_MIX -> {
+                // MEJORA 8: Mezcla de números calientes y fríos por rachas
+                val combinaciones = (0 until numCombinaciones).map {
+                    motorIA.generarCombinacionMixta(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
+                }
+                combinaciones
+            }
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligentes(
                 historico, maxNumero, cantidadNumeros, numCombinaciones, tipoLoteria.name
             )
@@ -134,14 +185,40 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicional(historico, cantidadNumeros, numCombinaciones, maxNumero)
             MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.METODO_ABUELO -> {
+                // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
+                val resultado = motorIA.ejecutarMetodoAbuelo(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
+                val combinaciones = mutableListOf(CombinacionSugerida(
+                    numeros = resultado.combinacionPrincipal,
+                    probabilidadRelativa = resultado.confianza * 100,
+                    explicacion = "🔮 ${resultado.explicacion}"
+                ))
+                // Añadir alternativas
+                resultado.combinacionesAlternativas.forEachIndexed { idx, alt ->
+                    combinaciones.add(CombinacionSugerida(
+                        numeros = alt,
+                        probabilidadRelativa = resultado.confianza * 90 - (idx * 5),
+                        explicacion = "🔮 Alternativa ${idx + 1} | ${resultado.sabiduria}"
+                    ))
+                }
+                // Completar si faltan
+                while (combinaciones.size < numCombinaciones) {
+                    combinaciones.add(motorIA.generarCombinacionMetodoAbuelo(
+                        historico, maxNumero, cantidadNumeros, tipoLoteria.name
+                    ))
+                }
+                combinaciones.take(numCombinaciones)
+            }
         }
-        
-        // Añadir reintegro DIFERENTE a cada combinación
+
+        // MEJORA 10: Añadir reintegro inteligente DIFERENTE a cada combinación
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            val reintegro = reintegrosOrdenados[index % reintegrosOrdenados.size]
+            val reintegro = reintegrosPredichos.getOrElse(index % reintegrosPredichos.size) {
+                (0..9).random()
+            }
             combinacion.copy(
                 complementarios = listOf(reintegro),
-                explicacion = "${combinacion.explicacion} | Reintegro: $reintegro"
+                explicacion = "${combinacion.explicacion} | 🎲R:$reintegro"
             )
         }
 
@@ -181,13 +258,37 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         
         val frecuenciasNumeros = contarFrecuencias(historico.flatMap { it.numeros }, 1..maxNumero)
         val frecuenciasEstrellas = contarFrecuencias(historico.flatMap { it.estrellas }, 1..maxEstrella)
-        
-        // Obtener estrellas ordenadas por frecuencia
-        val estrellasOrdenadas = frecuenciasEstrellas.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
-        
+
+        // MEJORA 10: Predicción inteligente de estrellas
+        val estrellasPredichas = if (historico.isNotEmpty()) {
+            motorIA.predecirEstrellas(historico, numCombinaciones * 2).map { it.numero }
+        } else {
+            (1..12).shuffled().take(numCombinaciones * 2)
+        }
+
+        // Convertir a ResultadoPrimitiva para usar las funciones del motor
+        val historicoConvertido = historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }
+
         val combinacionesBase = when (metodo) {
+            MetodoCalculo.ENSEMBLE_VOTING -> {
+                val resultado = motorIA.ejecutarEnsembleVoting(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
+                val combinaciones = mutableListOf(motorIA.generarCombinacionEnsemble(historicoConvertido, maxNumero, cantidadNumeros, "EURO"))
+                resultado.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt ->
+                    combinaciones.add(CombinacionSugerida(numeros = alt, probabilidadRelativa = resultado.confianzaGlobal * 90, explicacion = "🗳️ Alternativa Ensemble"))
+                }
+                while (combinaciones.size < numCombinaciones) { combinaciones.addAll(motorIA.generarCombinacionesInteligenteEuro(historico, 1)) }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.ALTA_CONFIANZA -> {
+                val prediccion = motorIA.generarPrediccionAltaConfianza(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
+                val combinaciones = mutableListOf(CombinacionSugerida(numeros = prediccion.combinacionPrincipal, probabilidadRelativa = prediccion.confianzaGlobal * 100, explicacion = "🎯 Alta Confianza"))
+                prediccion.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt -> combinaciones.add(CombinacionSugerida(numeros = alt, probabilidadRelativa = prediccion.confianzaGlobal * 85, explicacion = "🎯 Alternativa")) }
+                while (combinaciones.size < numCombinaciones) { combinaciones.addAll(motorIA.generarCombinacionesInteligenteEuro(historico, 1)) }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.RACHAS_MIX -> {
+                (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historicoConvertido, maxNumero, cantidadNumeros, "EURO") }
+            }
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligenteEuro(historico, numCombinaciones)
             MetodoCalculo.LAPLACE -> generarLaplace(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
@@ -197,26 +298,47 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicionalEuro(historico, numCombinaciones)
             MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.METODO_ABUELO -> {
+                // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
+                val resultado = motorIA.ejecutarMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
+                val combinaciones = mutableListOf(CombinacionSugerida(
+                    numeros = resultado.combinacionPrincipal,
+                    probabilidadRelativa = resultado.confianza * 100,
+                    explicacion = "🔮 ${resultado.explicacion}"
+                ))
+                resultado.combinacionesAlternativas.forEachIndexed { idx, alt ->
+                    combinaciones.add(CombinacionSugerida(
+                        numeros = alt,
+                        probabilidadRelativa = resultado.confianza * 90 - (idx * 5),
+                        explicacion = "🔮 Alternativa ${idx + 1} | ${resultado.sabiduria}"
+                    ))
+                }
+                while (combinaciones.size < numCombinaciones) {
+                    combinaciones.add(motorIA.generarCombinacionMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "EURO"))
+                }
+                combinaciones.take(numCombinaciones)
+            }
         }
-        
-        // Añadir estrellas DIFERENTES a cada combinación
+
+        // MEJORA 10: Añadir estrellas inteligentes DIFERENTES a cada combinación
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            // Rotar las estrellas para cada combinación
+            // Usar estrellas predichas con rotación
             val offset = index * 2
-            val estrella1 = estrellasOrdenadas[offset % estrellasOrdenadas.size]
-            val estrella2 = estrellasOrdenadas[(offset + 1) % estrellasOrdenadas.size]
+            val estrella1 = estrellasPredichas.getOrElse(offset % estrellasPredichas.size) { (1..12).random() }
+            val estrella2 = estrellasPredichas.getOrElse((offset + 1) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.random() }
             val estrellas = listOf(estrella1, estrella2).distinct().sorted()
-            
-            // Si son iguales, tomar la siguiente
+
+            // Si son iguales, tomar la siguiente disponible
             val estrellasFinales = if (estrellas.size == 1) {
-                listOf(estrella1, estrellasOrdenadas[(offset + 2) % estrellasOrdenadas.size]).sorted()
+                val siguiente = estrellasPredichas.getOrElse((offset + 2) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.random() }
+                listOf(estrella1, siguiente).sorted()
             } else {
                 estrellas
             }
-            
+
             combinacion.copy(
                 complementarios = estrellasFinales,
-                explicacion = "${combinacion.explicacion} | Estrellas: ${estrellasFinales.joinToString(", ")}"
+                explicacion = "${combinacion.explicacion} | ⭐${estrellasFinales.joinToString(",")}"
             )
         }
 
@@ -257,13 +379,37 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         
         val frecuenciasNumeros = contarFrecuencias(historico.flatMap { it.numeros }, 1..maxNumero)
         val frecuenciasClave = contarFrecuencias(historico.map { it.numeroClave }, 0..9)
-        
-        // Obtener números clave ordenados por frecuencia
-        val clavesOrdenadas = frecuenciasClave.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
-        
+
+        // MEJORA 10: Predicción inteligente de número clave
+        val clavesPredichas = if (historico.isNotEmpty()) {
+            motorIA.predecirNumeroClave(historico, numCombinaciones).map { it.numero }
+        } else {
+            (0..9).shuffled().take(numCombinaciones)
+        }
+
+        // Convertir a ResultadoPrimitiva para usar las funciones del motor
+        val historicoConvertido = historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }
+
         val combinacionesBase = when (metodo) {
+            MetodoCalculo.ENSEMBLE_VOTING -> {
+                val resultado = motorIA.ejecutarEnsembleVoting(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
+                val combinaciones = mutableListOf(motorIA.generarCombinacionEnsemble(historicoConvertido, maxNumero, cantidadNumeros, "GORDO"))
+                resultado.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt ->
+                    combinaciones.add(CombinacionSugerida(numeros = alt, probabilidadRelativa = resultado.confianzaGlobal * 90, explicacion = "🗳️ Alternativa Ensemble"))
+                }
+                while (combinaciones.size < numCombinaciones) { combinaciones.addAll(motorIA.generarCombinacionesInteligenteGordo(historico, 1)) }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.ALTA_CONFIANZA -> {
+                val prediccion = motorIA.generarPrediccionAltaConfianza(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
+                val combinaciones = mutableListOf(CombinacionSugerida(numeros = prediccion.combinacionPrincipal, probabilidadRelativa = prediccion.confianzaGlobal * 100, explicacion = "🎯 Alta Confianza"))
+                prediccion.combinacionesAlternativas.take(numCombinaciones - 1).forEach { alt -> combinaciones.add(CombinacionSugerida(numeros = alt, probabilidadRelativa = prediccion.confianzaGlobal * 85, explicacion = "🎯 Alternativa")) }
+                while (combinaciones.size < numCombinaciones) { combinaciones.addAll(motorIA.generarCombinacionesInteligenteGordo(historico, 1)) }
+                combinaciones.take(numCombinaciones)
+            }
+            MetodoCalculo.RACHAS_MIX -> {
+                (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historicoConvertido, maxNumero, cantidadNumeros, "GORDO") }
+            }
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligenteGordo(historico, numCombinaciones)
             MetodoCalculo.LAPLACE -> generarLaplace(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
@@ -273,14 +419,36 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicionalGordo(historico, numCombinaciones)
             MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.METODO_ABUELO -> {
+                // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
+                val resultado = motorIA.ejecutarMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
+                val combinaciones = mutableListOf(CombinacionSugerida(
+                    numeros = resultado.combinacionPrincipal,
+                    probabilidadRelativa = resultado.confianza * 100,
+                    explicacion = "🔮 ${resultado.explicacion}"
+                ))
+                resultado.combinacionesAlternativas.forEachIndexed { idx, alt ->
+                    combinaciones.add(CombinacionSugerida(
+                        numeros = alt,
+                        probabilidadRelativa = resultado.confianza * 90 - (idx * 5),
+                        explicacion = "🔮 Alternativa ${idx + 1} | ${resultado.sabiduria}"
+                    ))
+                }
+                while (combinaciones.size < numCombinaciones) {
+                    combinaciones.add(motorIA.generarCombinacionMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "GORDO"))
+                }
+                combinaciones.take(numCombinaciones)
+            }
         }
-        
-        // Añadir número clave DIFERENTE a cada combinación
+
+        // MEJORA 10: Añadir número clave inteligente DIFERENTE a cada combinación
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            val numeroClave = clavesOrdenadas[index % clavesOrdenadas.size]
+            val numeroClave = clavesPredichas.getOrElse(index % clavesPredichas.size) {
+                (0..9).random()
+            }
             combinacion.copy(
                 complementarios = listOf(numeroClave),
-                explicacion = "${combinacion.explicacion} | Nº Clave: $numeroClave"
+                explicacion = "${combinacion.explicacion} | 🔑K:$numeroClave"
             )
         }
 
@@ -1397,9 +1565,25 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 // Versión simplificada del algoritmo genético
                 motorIA.generarCombinacionesInteligentes(historico, 49, cantidadNumeros, numCombinaciones).map { it.numeros }
             }
+            MetodoCalculo.ENSEMBLE_VOTING -> {
+                val resultado = motorIA.ejecutarEnsembleVoting(historico, 49, cantidadNumeros, "PRIMITIVA")
+                listOf(resultado.combinacionGanadora) + resultado.combinacionesAlternativas.take(numCombinaciones - 1)
+            }
+            MetodoCalculo.ALTA_CONFIANZA -> {
+                val prediccion = motorIA.generarPrediccionAltaConfianza(historico, 49, cantidadNumeros, "PRIMITIVA")
+                listOf(prediccion.combinacionPrincipal) + prediccion.combinacionesAlternativas.take(numCombinaciones - 1)
+            }
+            MetodoCalculo.RACHAS_MIX -> {
+                (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
+            }
+            MetodoCalculo.METODO_ABUELO -> {
+                // 🔮 Método del Abuelo: Sistema de convergencias
+                val resultado = motorIA.ejecutarMetodoAbuelo(historico, 49, cantidadNumeros, "PRIMITIVA")
+                listOf(resultado.combinacionPrincipal) + resultado.combinacionesAlternativas.take(numCombinaciones - 1)
+            }
         }
     }
-    
+
     /**
      * Ejecuta backtesting para Euromillones.
      */
@@ -1800,9 +1984,15 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 // Completamente aleatorio
                 (0..99).shuffled().take(10)
             }
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
+                // Para loterías de 5 dígitos, usar frecuencias como fallback
+                terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .take(10).map { it.key }
+            }
         }
     }
-    
+
     /**
      * Ejecuta backtesting para Lotería de Navidad.
      * Compara terminaciones del Gordo usando diferentes estrategias por método.
@@ -1961,6 +2151,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             MetodoCalculo.ALEATORIO_PURO -> {
                 (0..99).shuffled().take(10)
+            }
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
+                // Para loterías de 5 dígitos, usar frecuencias como fallback
+                terminaciones.groupingBy { it }.eachCount()
+                    .entries.sortedByDescending { it.value }
+                    .take(10).map { it.key }
             }
         }
     }
