@@ -251,12 +251,19 @@ class AprendizajeService : Service() {
                 val dataSource = com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource(this@AprendizajeService)
                 val persistencia = com.loteria.probabilidad.domain.ml.BacktestPersistencia(this@AprendizajeService)
 
-                val combsPorIteracion = sorteos * 9 * 5
+                // 1ª iteración evalúa todos (8 métodos), las demás solo 3 que aprenden
+                val numMetodosTodos = MetodoCalculo.values().size
+                val numMetodosAprendizaje = 3
+                val combsPrimeraIt = sorteos * numMetodosTodos * 5
+                val combsRestoIt = sorteos * numMetodosAprendizaje * 5
+                val totalCombsEstimadas = combsPrimeraIt + combsRestoIt * (iteraciones - 1).coerceAtLeast(0)
                 calculador.onProgresoBacktest = { metodo, comb, total ->
                     metodoActual = metodo
                     agregarMetodoProcesado(metodo)
-                    combinacionActual = ((iteracionActual - 1).coerceAtLeast(0)) * combsPorIteracion + comb
-                    totalCombinaciones = combsPorIteracion * iteraciones
+                    val combsAnteriores = if (iteracionActual <= 1) 0
+                        else combsPrimeraIt + combsRestoIt * (iteracionActual - 2)
+                    combinacionActual = combsAnteriores + comb
+                    totalCombinaciones = totalCombsEstimadas
                 }
 
                 updateNotification("Cargando $tipoLoteria...", 0)
@@ -274,6 +281,31 @@ class AprendizajeService : Service() {
 
                 val mejoresResultadosPorMetodo = mutableMapOf<MetodoCalculo, ResultadoBacktest>()
 
+                // Métodos que realmente aprenden - solo estos se re-evalúan en iteraciones >1
+                val metodosQueAprenden = arrayOf(
+                    MetodoCalculo.METODO_ABUELO,
+                    MetodoCalculo.ENSEMBLE_VOTING,
+                    MetodoCalculo.IA_GENETICA
+                )
+
+                // Preparar aprendizaje del Abuelo por algoritmo (como el rápido)
+                val matematicas = MatematicasAbuelo()
+                val (maxNumero, cantidadNumeros) = when (tipoLoteria) {
+                    "EUROMILLONES" -> Pair(50, 5)
+                    "GORDO_PRIMITIVA" -> Pair(54, 5)
+                    else -> Pair(49, 6)
+                }
+                val historicoPrim: List<ResultadoPrimitiva>? = when (tipoLoteria) {
+                    "PRIMITIVA", "BONOLOTO" -> historicoPrecargado as? List<ResultadoPrimitiva>
+                    "EUROMILLONES" -> (historicoPrecargado as? List<ResultadoEuromillones>)?.map {
+                        ResultadoPrimitiva(it.fecha, it.numeros, 0, 0)
+                    }
+                    "GORDO_PRIMITIVA" -> (historicoPrecargado as? List<ResultadoGordoPrimitiva>)?.map {
+                        ResultadoPrimitiva(it.fecha, it.numeros, 0, 0)
+                    }
+                    else -> null
+                }
+
                 for (i in 1..iteraciones) {
                     if (!isRunning) break
 
@@ -281,7 +313,9 @@ class AprendizajeService : Service() {
                     progreso = ((i.toFloat() / iteraciones) * 100).toInt()
                     ultimaActualizacion = System.currentTimeMillis()
 
-                    val resultados = ejecutarIteracion(tipoLoteria, calculador, memoriaIA, historicoPrecargado, sorteos)
+                    // 1ª iteración: todos los métodos (para ranking). Siguientes: solo los que aprenden.
+                    val metodos = if (i == 1) MetodoCalculo.values() else metodosQueAprenden
+                    val resultados = ejecutarIteracion(tipoLoteria, calculador, memoriaIA, historicoPrecargado, sorteos, metodos)
 
                     for (resultado in resultados) {
                         val mejorPrevio = mejoresResultadosPorMetodo[resultado.metodo]
@@ -290,7 +324,46 @@ class AprendizajeService : Service() {
                         }
                     }
 
-                    val mejorActualIteracion = resultados.maxOfOrNull { it.puntuacionTotal } ?: 0.0
+                    // ═══ NUEVO: Aprendizaje del Abuelo por algoritmo (como el rápido) ═══
+                    if (historicoPrim != null && historicoPrim.size > sorteos + 100) {
+                        for (s in 0 until sorteos.coerceAtMost(10)) {
+                            val sorteo = historicoPrim[s]
+                            val historicoAnterior = historicoPrim.subList(
+                                s + 1, (s + 500).coerceAtMost(historicoPrim.size)
+                            )
+                            if (historicoAnterior.size < 100) continue
+
+                            val numerosReales = sorteo.numeros.toSet()
+
+                            // Evaluar cada algoritmo individualmente
+                            val (_, chiResultados) = matematicas.testChiCuadradoGlobal(historicoAnterior, maxNumero, cantidadNumeros)
+                            val bayesianos = matematicas.inferenciaBayesiana(historicoAnterior, maxNumero, cantidadNumeros)
+                            val fourier = matematicas.analizarFourier(historicoAnterior, maxNumero)
+                            val markov = matematicas.analizarMarkov(historicoAnterior, maxNumero)
+                            val entropia = matematicas.calcularEntropia(historicoAnterior, maxNumero)
+
+                            val topChi = chiResultados.filter { it.sesgo > 0 }.sortedByDescending { it.sesgo }.take(10).map { it.numero }
+                            val topBayes = bayesianos.entries.sortedByDescending { it.value.posteriorMedia }.take(10).map { it.key }
+                            val topFourier = fourier.entries.sortedByDescending { entry ->
+                                val comp = entry.value
+                                if (comp.confianzaPeriodicidad > 0.3) {
+                                    (1.0 - (comp.prediccionProximaSalida.toDouble() / comp.periodoDominante.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)) * comp.confianzaPeriodicidad
+                                } else 0.0
+                            }.take(10).map { it.key }
+                            val topMarkov = markov.entries.sortedByDescending { it.value.prediccionProximoSorteo }.take(10).map { it.key }
+                            val topEntropia = entropia.numerosConcentrados.take(10)
+
+                            val contribuciones = mapOf(
+                                "chiCuadrado" to topChi.count { it in numerosReales }.toDouble(),
+                                "bayesiano" to topBayes.count { it in numerosReales }.toDouble(),
+                                "fourier" to topFourier.count { it in numerosReales }.toDouble(),
+                                "markov" to topMarkov.count { it in numerosReales }.toDouble(),
+                                "entropia" to topEntropia.count { it in numerosReales }.toDouble()
+                            )
+                            memoriaIA.actualizarPesosAbuelo(contribuciones, contribuciones.values.sum().toInt(), tipoLoteria)
+                        }
+                    }
+
                     val mejorGlobal = mejoresResultadosPorMetodo.values.maxOfOrNull { it.puntuacionTotal } ?: 0.0
                     mejorPuntuacion = mejorGlobal
 
@@ -326,36 +399,37 @@ class AprendizajeService : Service() {
     @Suppress("UNCHECKED_CAST")
     private suspend fun ejecutarIteracion(
         tipoLoteria: String, calculador: CalculadorProbabilidad,
-        memoriaIA: MemoriaIA, historicoPrecargado: Any, sorteos: Int
+        memoriaIA: MemoriaIA, historicoPrecargado: Any, sorteos: Int,
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> = withContext(Dispatchers.Default) {
         when (tipoLoteria) {
             "PRIMITIVA", "BONOLOTO" -> {
                 val historico = historicoPrecargado as List<ResultadoPrimitiva>
-                val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos)
+                val results = calculador.ejecutarBacktestPrimitiva(historico, sorteos, tipoLoteria, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico, tipoLoteria, sorteos)
                 results
             }
             "EUROMILLONES" -> {
                 val historico = historicoPrecargado as List<ResultadoEuromillones>
-                val results = calculador.ejecutarBacktestEuromillones(historico, sorteos)
+                val results = calculador.ejecutarBacktestEuromillones(historico, sorteos, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, tipoLoteria, sorteos)
                 results
             }
             "GORDO_PRIMITIVA" -> {
                 val historico = historicoPrecargado as List<ResultadoGordoPrimitiva>
-                val results = calculador.ejecutarBacktestGordo(historico, sorteos)
+                val results = calculador.ejecutarBacktestGordo(historico, sorteos, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico.map { ResultadoPrimitiva(it.fecha, it.numeros, 0, 0) }, tipoLoteria, sorteos)
                 results
             }
             "LOTERIA_NACIONAL" -> {
                 val historico = historicoPrecargado as List<ResultadoNacional>
-                val results = calculador.ejecutarBacktestNacional(historico, sorteos)
+                val results = calculador.ejecutarBacktestNacional(historico, sorteos, tipoLoteria, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico.map { convertirNacionalATerminaciones(it) }, tipoLoteria, sorteos)
                 results
             }
             "NAVIDAD" -> {
                 val historico = historicoPrecargado as List<ResultadoNavidad>
-                val results = calculador.ejecutarBacktestNavidad(historico, sorteos)
+                val results = calculador.ejecutarBacktestNavidad(historico, sorteos, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico.map {
                     val gordo = it.gordo.filter { c -> c.isDigit() }.takeLast(5).padStart(5, '0')
                     convertirNumeroATerminaciones(gordo, it.fecha, it.reintegros)
@@ -364,7 +438,7 @@ class AprendizajeService : Service() {
             }
             "NINO" -> {
                 val historico = historicoPrecargado as List<ResultadoNacional>
-                val results = calculador.ejecutarBacktestNacional(historico, sorteos)
+                val results = calculador.ejecutarBacktestNacional(historico, sorteos, tipoLoteria, metodosAEvaluar)
                 calculador.aprenderDeBacktest(results, historico.map { convertirNacionalATerminaciones(it) }, tipoLoteria, sorteos)
                 results
             }
@@ -479,9 +553,9 @@ class AprendizajeService : Service() {
                                     (1.0 - (comp.prediccionProximaSalida.toDouble() / comp.periodoDominante.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)) * comp.confianzaPeriodicidad
                                 } else 0.0
                             }.take(10).map { it.key }
-                        } else (1..maxNumero).shuffled().take(10)
+                        } else (1..maxNumero).take(10)
                         val topMarkov = if (markov.isNotEmpty()) markov.entries.sortedByDescending { it.value.prediccionProximoSorteo }.take(10).map { it.key }
-                        else (1..maxNumero).shuffled().take(10)
+                        else (1..maxNumero).take(10)
                         val topEntropia = entropia.numerosConcentrados.take(10)
 
                         val contribuciones = mapOf(
@@ -574,6 +648,50 @@ class AprendizajeService : Service() {
                 if (entrenarGenetico) {
                     val distStr = distGenetico.entries.sortedBy { it.key }.joinToString(", ") { "${it.key}ac:${it.value}x" }
                     agregarLogRapido("   🧬 Genético: $distStr")
+                }
+
+                // Persistir resultados como ResultadoBacktest para que la UI los muestre
+                val backtestPersistencia = com.loteria.probabilidad.domain.ml.BacktestPersistencia(this@AprendizajeService)
+                val resultadosBacktest = mutableListOf<ResultadoBacktest>()
+
+                fun distToBacktest(dist: Map<Int, Int>, metodo: MetodoCalculo): ResultadoBacktest {
+                    val total = dist.values.sum().coerceAtLeast(1)
+                    val mejor = dist.keys.maxOrNull() ?: 0
+                    val promedio = dist.entries.sumOf { it.key * it.value }.toDouble() / total
+                    return ResultadoBacktest(
+                        metodo = metodo,
+                        sorteosProbados = total,
+                        aciertos0 = dist[0] ?: 0,
+                        aciertos1 = dist[1] ?: 0,
+                        aciertos2 = dist[2] ?: 0,
+                        aciertos3 = dist[3] ?: 0,
+                        aciertos4 = dist[4] ?: 0,
+                        aciertos5 = dist[5] ?: 0,
+                        aciertos6 = dist[6] ?: 0,
+                        puntuacionTotal = promedio * 10,
+                        mejorAcierto = mejor,
+                        promedioAciertos = promedio,
+                        tipoLoteria = tipoLoteria
+                    )
+                }
+
+                if (entrenarAbuelo && distAbuelo.isNotEmpty()) {
+                    resultadosBacktest.add(distToBacktest(distAbuelo, MetodoCalculo.METODO_ABUELO))
+                }
+                if (entrenarEnsemble && distEnsemble.isNotEmpty()) {
+                    resultadosBacktest.add(distToBacktest(distEnsemble, MetodoCalculo.ENSEMBLE_VOTING))
+                }
+                if (entrenarGenetico && distGenetico.isNotEmpty()) {
+                    resultadosBacktest.add(distToBacktest(distGenetico, MetodoCalculo.IA_GENETICA))
+                }
+
+                if (resultadosBacktest.isNotEmpty()) {
+                    // Combinar con resultados existentes (reemplazar métodos entrenados, mantener los demás)
+                    val existentes = backtestPersistencia.obtenerResultados(tipoLoteria)
+                    val metodosEntrenados = resultadosBacktest.map { it.metodo }.toSet()
+                    val combinados = existentes.filter { it.metodo !in metodosEntrenados } + resultadosBacktest
+                    backtestPersistencia.guardarResultados(tipoLoteria, combinados.sortedByDescending { it.puntuacionTotal })
+                    agregarLogRapido("📊 Resultados guardados: ${resultadosBacktest.size} métodos")
                 }
 
                 // Invalidar predicciones cacheadas

@@ -135,47 +135,17 @@ enum class MetodoCalculo(
                 "Los pesos se ajustan dinámicamente con optimizador Adam.",
         explicacionCorta = "Algoritmo genético + ensemble de 10 predictores"
     ),
-    LAPLACE(
-        displayName = "Regla de Laplace",
-        descripcion = "Probabilidad teórica: casos favorables / casos posibles. " +
-                "Todos los números tienen exactamente la misma probabilidad matemática.",
-        explicacionCorta = "P(A) = casos favorables / casos posibles"
-    ),
     FRECUENCIAS(
         displayName = "Análisis de Frecuencias",
         descripcion = "Basado en el histórico de sorteos. Prioriza los números que " +
                 "han salido más veces estadísticamente.",
         explicacionCorta = "Números más frecuentes en el histórico"
     ),
-    NUMEROS_CALIENTES(
-        displayName = "Números Calientes",
-        descripcion = "Selecciona los números que más han salido en los últimos sorteos. " +
-                "Teoría de las rachas: si un número sale mucho, seguirá saliendo.",
-        explicacionCorta = "Números con más apariciones recientes"
-    ),
     NUMEROS_FRIOS(
         displayName = "Números Fríos",
         descripcion = "Selecciona los números que menos han salido recientemente. " +
                 "Teoría del equilibrio: les 'toca' salir pronto.",
         explicacionCorta = "Números con menos apariciones recientes"
-    ),
-    EQUILIBRIO_ESTADISTICO(
-        displayName = "Equilibrio Estadístico",
-        descripcion = "Combina números calientes y fríos buscando un balance. " +
-                "Mezcla de diferentes estrategias para diversificar.",
-        explicacionCorta = "Mezcla de números calientes y fríos"
-    ),
-    PROBABILIDAD_CONDICIONAL(
-        displayName = "Probabilidad Condicional",
-        descripcion = "Analiza qué números tienden a salir juntos. " +
-                "Busca patrones de combinaciones que se repiten.",
-        explicacionCorta = "Números que suelen salir juntos"
-    ),
-    DESVIACION_MEDIA(
-        displayName = "Desviación de la Media",
-        descripcion = "Identifica números que están por encima o debajo de su " +
-                "frecuencia esperada según la ley de los grandes números.",
-        explicacionCorta = "Números alejados de su frecuencia esperada"
     ),
     ALEATORIO_PURO(
         displayName = "Aleatorio Puro",
@@ -335,3 +305,114 @@ enum class OpcionRangoFechas(val displayName: String, val rango: RangoFechas) {
     DESDE_2010("Desde 2010", RangoFechas("2010-01-01", null)),
     DESDE_2000("Desde 2000", RangoFechas("2000-01-01", null))
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// FÓRMULA DEL ABUELO - Modelos de datos
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Configuración del diseño de cobertura C(v,k,t,m).
+ * v=candidatos, k=números por boleto, t=tamaño subconjunto, m=garantía mínima.
+ */
+data class ConfiguracionCobertura(
+    val v: Int,
+    val k: Int,
+    val t: Int,
+    val m: Int,
+    val tipoLoteria: TipoLoteria
+)
+
+/**
+ * Resultado del algoritmo de cobertura para loterías de combinación.
+ */
+data class ResultadoCobertura(
+    val tickets: List<List<Int>>,
+    val garantia: String,
+    val numTickets: Int,
+    val candidatos: List<Int>,
+    val coberturaPct: Double,
+    val explicacion: String,
+    val probActivacion: Double = 0.0
+)
+
+/**
+ * Resultado de cobertura para loterías de dígitos (Nacional/Navidad/Niño).
+ */
+data class CoberturaDigitos(
+    val numeros: List<String>,
+    val terminacionesCubiertas: List<Int>,
+    val estrategia: String,
+    val explicacion: String
+)
+
+/**
+ * Puntuación anti-popularidad de una combinación.
+ */
+data class ScorePopularidad(
+    val combinacion: List<Int>,
+    val scoreUnicidad: Int,
+    val penalizaciones: List<String>,
+    val estimacionJugadores: String
+)
+
+/**
+ * Estructura de premios de una lotería.
+ * tasaRetorno: fracción de la recaudación que va a premios (ej: 0.55 = 55%)
+ */
+data class EstructuraPremios(
+    val tipoLoteria: TipoLoteria,
+    val precioBoleto: Double,
+    val categorias: List<CategoriaPremio>,
+    val tasaRetorno: Double = 0.55
+)
+
+/**
+ * Categoría de premio individual.
+ * - Si porcentajeFondo > 0: es premio variable (% del fondo variable tras descontar fijos)
+ * - Si porcentajeFondo == 0: es premio fijo (premioMedio contiene el importe fijo)
+ */
+data class CategoriaPremio(
+    val nombre: String,
+    val aciertos: Int,
+    val complementario: Boolean,
+    val premioMedio: Double,
+    val probabilidad: Double,
+    val porcentajeFondo: Double = 0.0
+)
+
+/**
+ * Resultado del análisis de Kelly.
+ */
+data class AnalisisKelly(
+    val tipoLoteria: TipoLoteria,
+    val boteActual: Double,
+    val valorEsperado: Double,
+    val fraccionKelly: Double,
+    val recomendacion: RecomendacionJuego,
+    val atractividad: Int,
+    val explicacion: String
+)
+
+/**
+ * Nivel de recomendación de juego.
+ */
+enum class RecomendacionJuego(val displayName: String, val color: Long) {
+    NO_JUGAR("No jugar", 0xFFD32F2F),
+    MINIMO("Mínimo", 0xFFF57C00),
+    MODERADO("Moderado", 0xFFFBC02D),
+    FAVORABLE("Favorable", 0xFF7CB342),
+    MUY_FAVORABLE("Muy favorable", 0xFF388E3C)
+}
+
+/**
+ * Resultado combinado de la Fórmula del Abuelo (3 pilares).
+ */
+data class ResultadoFormulaAbuelo(
+    val cobertura: ResultadoCobertura?,
+    val coberturaDigitos: CoberturaDigitos?,
+    val ticketsFiltrados: List<ScorePopularidad>,
+    val analisisKelly: AnalisisKelly,
+    val resumen: String,
+    val suplementoCandidatos: List<Int> = emptyList(),   // reintegro, estrellas, clave según lotería
+    val suplementoPorcentajes: List<Double> = emptyList() // porcentaje histórico de cada suplemento
+)

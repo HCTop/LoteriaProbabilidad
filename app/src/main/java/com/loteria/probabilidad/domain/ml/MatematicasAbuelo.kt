@@ -192,6 +192,7 @@ class MatematicasAbuelo {
             var mejorAmplitud = 0.0
             var mejorFrecuencia = 0.0
             var mejorFase = 0.0
+            val todasAmplitudes = mutableListOf<Double>()
 
             val periodoMin = 3
             for (periodo in periodoMin..minOf(maxPeriodo, n / 3)) {
@@ -206,6 +207,7 @@ class MatematicasAbuelo {
                 }
 
                 val amplitud = 2.0 * sqrt(cosSum.pow(2) + sinSum.pow(2)) / n
+                todasAmplitudes.add(amplitud)
 
                 if (amplitud > mejorAmplitud) {
                     mejorAmplitud = amplitud
@@ -226,10 +228,20 @@ class MatematicasAbuelo {
             val sorteoHastaPico = (diferenciaFase / (2.0 * PI * mejorFrecuencia)).roundToInt()
                 .coerceIn(0, maxPeriodo)
 
-            // Confianza en la periodicidad basada en la amplitud relativa
-            // Comparar con ruido esperado (1/sqrt(n) para señal aleatoria)
-            val ruidoEsperado = 1.0 / sqrt(n.toDouble())
-            val confianza = (mejorAmplitud / (ruidoEsperado * 3)).coerceIn(0.0, 1.0)
+            // Test F espectral: ratio entre potencia del pico y potencia media del ruido
+            val peakPower = mejorAmplitud * mejorAmplitud
+            val noisePowers = todasAmplitudes.map { it * it }.filter { it < peakPower * 0.99 }
+            val avgNoise = noisePowers.average().coerceAtLeast(1e-10)
+            val fRatio = peakPower / avgNoise
+
+            // F crítico: ~4.0 para p=0.05, ~7.0 para p=0.01
+            val confianza = when {
+                fRatio > 7.0 -> 0.95
+                fRatio > 4.0 -> 0.75
+                fRatio > 2.5 -> 0.50
+                fRatio > 1.5 -> 0.25
+                else -> 0.05
+            }
 
             ComponenteFourier(
                 numero = numero,
@@ -412,7 +424,10 @@ class MatematicasAbuelo {
                 (probDespuesNoSale * (1 - probDespuesNoSale)) / totalDespuesNoSale.coerceAtLeast(1)
             )
             val zScore = if (se > 0) diferencia / se else 0.0
-            val esSignificativo = zScore > 1.96 // p < 0.05
+            // Corrección de Bonferroni: alpha_corregido = 0.05 / maxNumero
+            // z crítico ≈ sqrt(2 * ln(2 * maxNumero / 0.05))
+            val zCritico = sqrt(2.0 * ln(2.0 * maxNumero / 0.05))  // ~3.29 para 49
+            val esSignificativo = zScore > zCritico
 
             // Estado actual y predicción
             val estadoActual = numero in historico[0].numeros
@@ -602,7 +617,7 @@ class MatematicasAbuelo {
 
             // Completar si es necesario
             while (combinacion.size < cantidadNumeros) {
-                val disponible = (1..maxNumero).filter { it !in combinacion }.randomOrNull() ?: break
+                val disponible = (1..maxNumero).filter { it !in combinacion }.firstOrNull() ?: break
                 combinacion.add(disponible)
             }
 
@@ -649,7 +664,7 @@ class MatematicasAbuelo {
             // Completar si faltan
             val completa = if (combinacion.size < cantidadNumeros) {
                 val extras = (1..maxNumero).filter { it !in combinacion }
-                    .shuffled().take(cantidadNumeros - combinacion.size)
+                    .take(cantidadNumeros - combinacion.size)
                 combinacion + extras
             } else combinacion
 
@@ -785,7 +800,8 @@ class MatematicasAbuelo {
         historico: List<ResultadoPrimitiva>,
         maxNumero: Int,
         cantidadNumeros: Int,
-        pesosAprendidos: Map<String, Double> = emptyMap()
+        pesosAprendidos: Map<String, Double> = emptyMap(),
+        entrenamientos: Int = 0
     ): List<ConvergenciaFinal> {
         // 1. Chi-Cuadrado: sesgos reales
         val (chiTotal, chiResultados) = testChiCuadradoGlobal(historico, maxNumero, cantidadNumeros)
@@ -811,6 +827,16 @@ class MatematicasAbuelo {
         val hayPeriodicidades = fourier.count { (it.value.confianzaPeriodicidad > 0.5) } > maxNumero * 0.05
         val hayBajaEntropia = entropia.esVentanaBajaEntropia
 
+        // Log de cada algoritmo
+        val chiSignif = chiResultados.count { it.esSignificativo }
+        LogAbuelo.algoritmo("Chi²", "$chiSignif números significativos de $maxNumero", haySesgosReales)
+        val fourierSignif = fourier.count { it.value.confianzaPeriodicidad > 0.5 }
+        LogAbuelo.algoritmo("Fourier", "$fourierSignif periodicidades detectadas (F-test)", hayPeriodicidades)
+        val markovSignif = markov1.count { it.value.esMarkovSignificativo }
+        LogAbuelo.algoritmo("Markov", "$markovSignif transiciones significativas (Bonferroni)", hayPatronesMarkov)
+        LogAbuelo.algoritmo("Bayesiano", "${bayesianos.size} posteriors calculados", true)
+        LogAbuelo.algoritmo("Entropía", "ventana baja=$hayBajaEntropia, ${entropia.numerosConcentrados.size} concentrados", hayBajaEntropia)
+
         // Pesos adaptativos según lo que sea estadísticamente significativo
         var pesoChi = if (haySesgosReales) 0.30 else 0.10
         var pesoBayes = 0.20 // Siempre útil
@@ -818,9 +844,13 @@ class MatematicasAbuelo {
         var pesoMarkov = if (hayPatronesMarkov) 0.15 else 0.05
         var pesoEntropia = if (hayBajaEntropia) 0.15 else 0.05
 
-        // Integrar pesos aprendidos si existen (mezcla 50/50 con pesos estadísticos)
+        // Integrar pesos aprendidos con mezcla adaptativa (sigmoide por entrenamientos)
+        // 0 entrenamientos → mezcla=0.10 (90% estadístico)
+        // 50 entrenamientos → mezcla≈0.48 (~50/50)
+        // 200+ entrenamientos → mezcla≈0.82 (82% aprendido)
         if (pesosAprendidos.isNotEmpty()) {
-            val mezcla = 0.5 // 50% estadístico + 50% aprendido
+            val mezcla = 0.1 + 0.75 / (1.0 + exp(-(entrenamientos - 50.0) / 30.0))
+            LogAbuelo.mezcla(1.0 - mezcla, mezcla, entrenamientos)
             pesoChi = pesoChi * (1 - mezcla) + (pesosAprendidos["chiCuadrado"] ?: 0.2) * mezcla
             pesoBayes = pesoBayes * (1 - mezcla) + (pesosAprendidos["bayesiano"] ?: 0.2) * mezcla
             pesoFourier = pesoFourier * (1 - mezcla) + (pesosAprendidos["fourier"] ?: 0.2) * mezcla
@@ -994,7 +1024,7 @@ class MatematicasAbuelo {
 
         // Completar si faltan
         while (seleccionados.size < cantidadNumeros) {
-            val disponible = (1..maxNumero).filter { it !in seleccionados }.randomOrNull() ?: break
+            val disponible = (1..maxNumero).filter { it !in seleccionados }.firstOrNull() ?: break
             seleccionados.add(disponible)
         }
 

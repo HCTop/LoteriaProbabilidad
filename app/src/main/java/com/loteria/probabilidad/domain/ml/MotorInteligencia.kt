@@ -12,15 +12,44 @@ import kotlin.random.Random
  * Mejora con cada backtesting ejecutado.
  */
 class MotorInteligencia(private val context: Context? = null) {
-    
+
     private val memoria: MemoriaIA? = context?.let { MemoriaIA(it) }
     private var pesosCaracteristicas: MutableMap<String, Double> = mutableMapOf()
     private var config = ConfiguracionGenetica()
     private val contribuciones = mutableMapOf<String, Double>()
     private var tipoLoteriaActual: String = "PRIMITIVA"
+
+    /** Random determinista: mismos datos → mismos resultados */
+    private var rnd: Random = Random(0)
+
+    private fun inicializarSemilla(tipoLoteria: String, historico: List<*>) {
+        val pesosHash = pesosCaracteristicas.entries.sumOf {
+            (it.key.hashCode().toLong() * 31 + (it.value * 1000000).toLong())
+        }
+        val estrategiasHash = (memoria?.obtenerPesosEstrategias(tipoLoteria)?.entries?.sumOf {
+            (it.key.hashCode().toLong() * 31 + (it.value * 1000000).toLong())
+        } ?: 0L)
+        val entrenamientos = (memoria?.obtenerTotalEntrenamientos(tipoLoteria) ?: 0).toLong()
+        // Incluir pesos del Abuelo para que cambien las combinaciones tras entrenamiento abuelo
+        val pesosAbueloHash = (memoria?.obtenerPesosAbuelo(tipoLoteria)?.entries?.sumOf {
+            (it.key.hashCode().toLong() * 31 + (it.value * 1000000).toLong())
+        } ?: 0L)
+        val entrenamientosAbuelo = (memoria?.obtenerEntrenamientosAbuelo(tipoLoteria) ?: 0).toLong()
+        val hash = tipoLoteria.hashCode().toLong() * 31 + historico.size.toLong() * 17 +
+            (historico.lastOrNull()?.hashCode()?.toLong() ?: 0L) +
+            pesosHash + estrategiasHash + entrenamientos * 7 +
+            pesosAbueloHash * 13 + entrenamientosAbuelo * 11
+        rnd = Random(hash)
+    }
+
+    private fun <T> List<T>.randomDet(): T = this.random(rnd)
+    private fun <T> List<T>.randomDetOrNull(): T? = if (isEmpty()) null else this.random(rnd)
+    private fun IntRange.randomDet(): Int = this.random(rnd)
     
     init { cargarMemoria("PRIMITIVA") }
     
+    fun recargarMemoria(tipoLoteria: String) = cargarMemoria(tipoLoteria)
+
     private fun cargarMemoria(tipoLoteria: String) {
         tipoLoteriaActual = tipoLoteria
         pesosCaracteristicas = (memoria?.obtenerPesosCaracteristicas(tipoLoteria) 
@@ -31,6 +60,10 @@ class MotorInteligencia(private val context: Context? = null) {
     fun obtenerResumenIA(tipoLoteria: String = "PRIMITIVA"): ResumenIA? = memoria?.obtenerResumenIA(tipoLoteria)
 
     fun getContribuciones(): Map<String, Double> = contribuciones.toMap()
+    fun getPesosCaracteristicas(): Map<String, Double> = pesosCaracteristicas.toMap()
+    fun getTotalEntrenamientos(tipoLoteria: String): Int = memoria?.obtenerTotalEntrenamientos(tipoLoteria) ?: 0
+    fun getPesosAbuelo(tipoLoteria: String): Map<String, Double> = memoria?.obtenerPesosAbuelo(tipoLoteria) ?: emptyMap()
+    fun getEntrenamientosAbuelo(tipoLoteria: String): Int = memoria?.obtenerEntrenamientosAbuelo(tipoLoteria) ?: 0
     
     /**
      * Genera combinaciones usando IA con memoria.
@@ -49,9 +82,8 @@ class MotorInteligencia(private val context: Context? = null) {
             return generarHibridoSimple(historico, maxNumero, cantidadNumeros, numCombinaciones)
         }
         
-        // Semilla para variación en la selección dentro de cada pool
-        val semilla = System.nanoTime()
-        val rnd = Random(semilla)
+        // Semilla determinista: mismos datos → mismos resultados
+        inicializarSemilla(tipoLoteria, historico)
         
         val car = extraerCaracteristicas(historico, maxNumero, tipoLoteria)
         val nombreNivel = memoria?.obtenerNombreNivel(tipoLoteria) ?: "🌱 Novato"
@@ -184,7 +216,7 @@ class MotorInteligencia(private val context: Context? = null) {
             repeat(numBal) { i ->
                 val num = if (i % 2 == 0 && bajos.size > i/2) bajos[i/2]
                          else if (altos.size > i/2) altos[i/2]
-                         else (1..maxNumero).filter { it !in numerosSeleccionados }.randomOrNull()
+                         else (1..maxNumero).filter { it !in numerosSeleccionados }.randomDetOrNull()
                 num?.let { numerosSeleccionados.add(it) }
             }
             
@@ -278,7 +310,7 @@ class MotorInteligencia(private val context: Context? = null) {
         // Crear población inicial
         var poblacion = crearPoblacionInicial(car, maxNumero, cantidadNumeros)
         while (poblacion.size < poblacionDinamica) {
-            poblacion.add(Individuo((1..maxNumero).shuffled().take(cantidadNumeros)))
+            poblacion.add(Individuo((1..maxNumero).shuffled(rnd).take(cantidadNumeros)))
         }
 
         // Evaluar fitness inicial
@@ -315,25 +347,56 @@ class MotorInteligencia(private val context: Context? = null) {
         sorteosProbados: Int
     ) {
         if (memoria == null || resultados.isEmpty()) return
-        
+
         val resultadoIA = resultados.find { it.metodo == MetodoCalculo.IA_GENETICA }
         val mejorResultado = resultados.maxByOrNull { it.puntuacionTotal }
-        
+
         if (resultadoIA == null || mejorResultado == null) return
-        
+
         // Si otro método fue mejor, aprender de él
         if (mejorResultado.metodo != MetodoCalculo.IA_GENETICA) {
             ajustarPesosSegunMetodo(mejorResultado.metodo)
         }
-        
-        // Actualizar memoria CON EL TIPO DE LOTERÍA ESPECÍFICO
+
+        // Actualizar pesos de características (genético)
         memoria.actualizarPesos(
             contribuciones.toMap(),
             resultadoIA.puntuacionTotal,
             memoria.obtenerMejorPuntuacion(tipoLoteria),
-            tipoLoteria  // ← IMPORTANTE: cada lotería tiene su propia memoria
+            tipoLoteria
         )
-        
+
+        // ═══ NUEVO: Actualizar pesos desde resultado real ═══
+        // Usar el mejor acierto como señal directa
+        val cantidadNumeros = if (tipoLoteria == "EUROMILLONES") 5
+            else if (tipoLoteria == "GORDO_PRIMITIVA") 5 else 6
+        val maxNumero = when (tipoLoteria) {
+            "EUROMILLONES" -> 50
+            "GORDO_PRIMITIVA" -> 54
+            else -> 49
+        }
+        memoria.actualizarPesosDesdeResultadoReal(
+            mejorResultado.mejorAcierto, cantidadNumeros, maxNumero, tipoLoteria
+        )
+
+        // ═══ NUEVO: Registrar rendimiento por estrategia (ensemble) ═══
+        val aciertosEstrategia = mutableMapOf<EstrategiaPrediccion, Int>()
+        for (res in resultados) {
+            val estrategia = when (res.metodo) {
+                MetodoCalculo.IA_GENETICA -> EstrategiaPrediccion.GENETICO
+                MetodoCalculo.ALTA_CONFIANZA -> EstrategiaPrediccion.ALTA_CONFIANZA
+                MetodoCalculo.RACHAS_MIX -> EstrategiaPrediccion.RACHAS_MIX
+                MetodoCalculo.ENSEMBLE_VOTING -> EstrategiaPrediccion.GENETICO
+                else -> null
+            }
+            if (estrategia != null) {
+                aciertosEstrategia[estrategia] = res.mejorAcierto
+            }
+        }
+        if (aciertosEstrategia.isNotEmpty()) {
+            memoria.registrarRendimientoEstrategias(aciertosEstrategia, tipoLoteria)
+        }
+
         // Registrar números exitosos para esta lotería
         historico.take(sorteosProbados).forEach { sorteo ->
             memoria.registrarNumerosExitosos(sorteo.numeros, 1, tipoLoteria)
@@ -343,7 +406,7 @@ class MotorInteligencia(private val context: Context? = null) {
                 }
             }
         }
-        
+
         // Recargar memoria para esta lotería
         cargarMemoria(tipoLoteria)
     }
@@ -351,10 +414,7 @@ class MotorInteligencia(private val context: Context? = null) {
     private fun ajustarPesosSegunMetodo(metodo: MetodoCalculo) {
         val clave = when (metodo) {
             MetodoCalculo.FRECUENCIAS -> "frecuencia"
-            MetodoCalculo.NUMEROS_CALIENTES -> "tendencia"
             MetodoCalculo.NUMEROS_FRIOS -> "gap"
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> "patrones"
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> "balance"
             else -> return
         }
         contribuciones[clave] = (contribuciones[clave] ?: 0.0) + 0.5
@@ -391,7 +451,7 @@ class MotorInteligencia(private val context: Context? = null) {
         var poblacion = crearPoblacionInicial(car, maxNumero, cantidadNumeros)
         // Ajustar tamaño de población si es necesario
         while (poblacion.size < poblacionDinamica) {
-            poblacion.add(Individuo((1..maxNumero).shuffled().take(cantidadNumeros)))
+            poblacion.add(Individuo((1..maxNumero).shuffled(rnd).take(cantidadNumeros)))
         }
 
         // Evaluar fitness inicial
@@ -539,40 +599,40 @@ class MotorInteligencia(private val context: Context? = null) {
 
         // Por frecuencia alta
         repeat(n) {
-            pob.add(Individuo(topFrec.shuffled().take(cant)))
+            pob.add(Individuo(topFrec.shuffled(rnd).take(cant)))
         }
         // Por gap (números atrasados)
         repeat(n) {
-            pob.add(Individuo(topGap.shuffled().take(cant)))
+            pob.add(Individuo(topGap.shuffled(rnd).take(cant)))
         }
         // Por tendencia reciente
         repeat(n) {
-            pob.add(Individuo(topTend.shuffled().take(cant)))
+            pob.add(Individuo(topTend.shuffled(rnd).take(cant)))
         }
 
         // MEJORA 2: Por ciclo (números "debidos")
         repeat(n) {
             if (topCiclo.size >= cant) {
-                pob.add(Individuo(topCiclo.shuffled().take(cant)))
+                pob.add(Individuo(topCiclo.shuffled(rnd).take(cant)))
             } else {
-                val mix = topCiclo + (1..maxNum).filter { it !in topCiclo }.shuffled().take(cant - topCiclo.size)
-                pob.add(Individuo(mix.shuffled().take(cant)))
+                val mix = topCiclo + (1..maxNum).filter { it !in topCiclo }.shuffled(rnd).take(cant - topCiclo.size)
+                pob.add(Individuo(mix.shuffled(rnd).take(cant)))
             }
         }
 
         // MEJORA 2: Mixto ciclo + frecuencia (combina "debidos" con frecuentes)
         repeat(n) {
-            val deCiclo = topCiclo.shuffled().take(cant / 2)
-            val deFrec = topFrec.filter { it !in deCiclo }.shuffled().take(cant - deCiclo.size)
+            val deCiclo = topCiclo.shuffled(rnd).take(cant / 2)
+            val deFrec = topFrec.filter { it !in deCiclo }.shuffled(rnd).take(cant - deCiclo.size)
             val mix = (deCiclo + deFrec).distinct()
-            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled().take(cant - mix.size) else emptyList()
+            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled(rnd).take(cant - mix.size) else emptyList()
             pob.add(Individuo((mix + completar).take(cant)))
         }
 
         // Mixto: frecuentes + fríos (contrarios)
         repeat(n) {
-            val mix = (topFrec.shuffled().take(cant - 2) + bottomFrec.shuffled().take(2)).distinct()
-            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled().take(cant - mix.size) else emptyList()
+            val mix = (topFrec.shuffled(rnd).take(cant - 2) + bottomFrec.shuffled(rnd).take(2)).distinct()
+            val completar = if (mix.size < cant) (1..maxNum).filter { it !in mix }.shuffled(rnd).take(cant - mix.size) else emptyList()
             pob.add(Individuo((mix + completar).take(cant)))
         }
 
@@ -580,7 +640,7 @@ class MotorInteligencia(private val context: Context? = null) {
         repeat(n) {
             if (car.companeros.isNotEmpty()) {
                 // Elegir un número semilla frecuente
-                val semilla = topFrec.randomOrNull() ?: (1..maxNum).random()
+                val semilla = topFrec.randomDetOrNull() ?: (1..maxNum).randomDet()
                 val misCompaneros = car.companeros[semilla] ?: emptyList()
 
                 // Construir combinación: semilla + sus compañeros + frecuentes
@@ -589,20 +649,20 @@ class MotorInteligencia(private val context: Context? = null) {
 
                 // Completar con frecuentes si faltan
                 while (nums.size < cant) {
-                    val candidato = topFrec.filter { it !in nums }.randomOrNull()
-                        ?: (1..maxNum).filter { it !in nums }.random()
+                    val candidato = topFrec.filter { it !in nums }.randomDetOrNull()
+                        ?: (1..maxNum).filter { it !in nums }.randomDet()
                     nums.add(candidato)
                 }
 
                 pob.add(Individuo(nums.toList()))
             } else {
-                pob.add(Individuo(topFrec.shuffled().take(cant)))
+                pob.add(Individuo(topFrec.shuffled(rnd).take(cant)))
             }
         }
 
         // Aleatorio puro
         while (pob.size < config.poblacion) {
-            pob.add(Individuo((1..maxNum).shuffled().take(cant)))
+            pob.add(Individuo((1..maxNum).shuffled(rnd).take(cant)))
         }
 
         return pob
@@ -675,14 +735,14 @@ class MotorInteligencia(private val context: Context? = null) {
         // MEJORA 3: Basado en compañeros
         repeat(n) {
             if (car.companeros.isNotEmpty()) {
-                val semilla = topFrec.randomOrNull() ?: (1..maxNum).random(rnd)
+                val semilla = topFrec.randomDetOrNull() ?: (1..maxNum).random(rnd)
                 val misCompaneros = car.companeros[semilla] ?: emptyList()
 
                 val nums = mutableSetOf(semilla)
                 nums.addAll(misCompaneros.take(cant - 1))
 
                 while (nums.size < cant) {
-                    val candidato = topFrec.filter { it !in nums }.randomOrNull()
+                    val candidato = topFrec.filter { it !in nums }.randomDetOrNull()
                         ?: (1..maxNum).filter { it !in nums }.random(rnd)
                     nums.add(candidato)
                 }
@@ -735,8 +795,8 @@ class MotorInteligencia(private val context: Context? = null) {
                     crossoverUniforme(p1, p2, maxNum, cant)
                 } else {
                     // Crossover clásico: combinar genes de ambos padres
-                    val genes = (p1.genes + p2.genes).distinct().shuffled().take(cant)
-                    val completar = if (genes.size < cant) (1..maxNum).filter { it !in genes }.shuffled().take(cant - genes.size) else emptyList()
+                    val genes = (p1.genes + p2.genes).distinct().shuffled(rnd).take(cant)
+                    val completar = if (genes.size < cant) (1..maxNum).filter { it !in genes }.shuffled(rnd).take(cant - genes.size) else emptyList()
                     Individuo(genes + completar)
                 }
             } else {
@@ -758,7 +818,7 @@ class MotorInteligencia(private val context: Context? = null) {
      * Selección por torneo: selecciona el mejor de N individuos aleatorios.
      */
     private fun seleccionTorneo(pob: List<Individuo>, torneoSize: Int): Individuo {
-        return pob.shuffled().take(torneoSize).maxByOrNull { it.fitness }!!
+        return pob.shuffled(rnd).take(torneoSize).maxByOrNull { it.fitness }!!
     }
 
     /**
@@ -778,7 +838,7 @@ class MotorInteligencia(private val context: Context? = null) {
                 genP1 != null && genP2 != null -> if (Random.nextBoolean()) genP1 else genP2
                 genP1 != null -> genP1
                 genP2 != null -> genP2
-                else -> todosGenes.filter { it !in genesHijo }.randomOrNull() ?: (1..maxNum).filter { it !in genesHijo }.random()
+                else -> todosGenes.filter { it !in genesHijo }.randomDetOrNull() ?: (1..maxNum).filter { it !in genesHijo }.randomDet()
             }
 
             if (gen !in genesHijo) {
@@ -790,7 +850,7 @@ class MotorInteligencia(private val context: Context? = null) {
         while (genesHijo.size < cant) {
             val disponibles = (1..maxNum).filter { it !in genesHijo }
             if (disponibles.isNotEmpty()) {
-                genesHijo.add(disponibles.random())
+                genesHijo.add(disponibles.randomDet())
             } else break
         }
 
@@ -813,7 +873,7 @@ class MotorInteligencia(private val context: Context? = null) {
             val idx = Random.nextInt(genes.size)
             val disponibles = (1..maxNum).filter { it !in genes }
             if (disponibles.isNotEmpty()) {
-                genes[idx] = disponibles.random()
+                genes[idx] = disponibles.randomDet()
             }
         }
 
@@ -896,7 +956,7 @@ class MotorInteligencia(private val context: Context? = null) {
                 genP1 != null && genP2 != null -> if (rnd.nextBoolean()) genP1 else genP2
                 genP1 != null -> genP1
                 genP2 != null -> genP2
-                else -> todosGenes.filter { it !in genesHijo }.randomOrNull() ?: (1..maxNum).filter { it !in genesHijo }.random(rnd)
+                else -> todosGenes.filter { it !in genesHijo }.randomDetOrNull() ?: (1..maxNum).filter { it !in genesHijo }.random(rnd)
             }
 
             if (gen !in genesHijo) {
@@ -1725,7 +1785,7 @@ class MotorInteligencia(private val context: Context? = null) {
             val poblacionDinamica = config.calcularPoblacionDinamica(entrenamiento.size)
             var poblacion = crearPoblacionInicial(car, maxNumero, cantidadNumeros)
             while (poblacion.size < poblacionDinamica) {
-                poblacion.add(Individuo((1..maxNumero).shuffled().take(cantidadNumeros)))
+                poblacion.add(Individuo((1..maxNumero).shuffled(rnd).take(cantidadNumeros)))
             }
             poblacion.forEach { evaluarFitness(it, car) }
 
@@ -1991,6 +2051,7 @@ class MotorInteligencia(private val context: Context? = null) {
         tipoLoteria: String = "PRIMITIVA"
     ): PrediccionAltaConfianza {
         cargarMemoria(tipoLoteria)
+        inicializarSemilla(tipoLoteria, historico)
 
         val car = extraerCaracteristicas(historico, maxNumero, tipoLoteria)
         val scoresNumeros = mutableListOf<ScoreNumero>()
@@ -2132,7 +2193,7 @@ class MotorInteligencia(private val context: Context? = null) {
         }
 
         while (seleccionados.size < cantidad) {
-            val disponible = (1..maxNumero).filter { it !in seleccionados }.randomOrNull() ?: break
+            val disponible = (1..maxNumero).filter { it !in seleccionados }.randomDetOrNull() ?: break
             seleccionados.add(disponible)
         }
 
@@ -2222,9 +2283,9 @@ class MotorInteligencia(private val context: Context? = null) {
             
             // Mezclar estrategias
             val numeros = when (it % 3) {
-                0 -> top.shuffled().take(cant)
-                1 -> (top.shuffled().take(cant - 1) + bottom.shuffled().take(1)).shuffled()
-                else -> (1..maxNum).shuffled().take(cant)
+                0 -> top.shuffled(rnd).take(cant)
+                1 -> (top.shuffled(rnd).take(cant - 1) + bottom.shuffled(rnd).take(1)).shuffled(rnd)
+                else -> (1..maxNum).shuffled(rnd).take(cant)
             }.sorted()
             
             val numSet = numeros.toSet()
@@ -2472,6 +2533,8 @@ class MotorInteligencia(private val context: Context? = null) {
         cantidad: Int = 6,
         tipoLoteria: String = "PRIMITIVA"
     ): CombinacionSugerida {
+        cargarMemoria(tipoLoteria)
+        inicializarSemilla(tipoLoteria, historico)
         val rachas = detectarRachas(historico, maxNum)
         val car = extraerCaracteristicas(historico, maxNum, tipoLoteria)
 
@@ -2488,7 +2551,7 @@ class MotorInteligencia(private val context: Context? = null) {
         val normales = rachas.values
             .filter { it.tipoRacha == TipoRacha.NORMAL }
             .map { it.numero }
-            .shuffled()
+            .sorted()
 
         val seleccionados = mutableSetOf<Int>()
 
@@ -2525,7 +2588,7 @@ class MotorInteligencia(private val context: Context? = null) {
                 .forEach { seleccionados.add(it) }
 
             while (seleccionados.size < cantidad) {
-                val disponible = (1..maxNum).filter { it !in seleccionados }.randomOrNull() ?: break
+                val disponible = (1..maxNum).filter { it !in seleccionados }.firstOrNull() ?: break
                 seleccionados.add(disponible)
             }
             seleccionados.toList().sorted()
@@ -2668,6 +2731,7 @@ class MotorInteligencia(private val context: Context? = null) {
         tipoLoteria: String = "PRIMITIVA"
     ): ResultadoMetodoAbuelo {
         cargarMemoria(tipoLoteria)
+        inicializarSemilla(tipoLoteria, historico)
 
         if (historico.size < 100) {
             return generarMetodoAbueloSimple(historico, maxNumero, cantidadNumeros)
@@ -2740,6 +2804,14 @@ class MotorInteligencia(private val context: Context? = null) {
         val pesoAvanzado = if (haySesgosReales || hayPatronesMarkov || hayPeriodicidades) 0.60 else 0.35
         val pesoClasico = 1.0 - pesoAvanzado
 
+        // Mezcla adaptativa precalculada (sigmoide por entrenamientos)
+        val entrenamientosAbuelo = memoria?.obtenerEntrenamientosAbuelo(tipoLoteria) ?: 0
+        val mezclaAprendido = if (pesosAprendidos.isNotEmpty()) {
+            val m = 0.1 + 0.75 / (1.0 + Math.exp(-(entrenamientosAbuelo - 50.0) / 30.0))
+            LogAbuelo.mezcla(1.0 - m, m, entrenamientosAbuelo)
+            m
+        } else 0.0
+
         // ═══════════════════════════════════════════════════════════════════
         // FASE 4: CONVERGENCIA FINAL MULTI-DIMENSIONAL
         // ═══════════════════════════════════════════════════════════════════
@@ -2789,9 +2861,9 @@ class MotorInteligencia(private val context: Context? = null) {
             var wMarkov = if (hayPatronesMarkov) 0.15 else 0.05
             var wEntropia = if (hayBajaEntropia) 0.10 else 0.05
 
-            // Integrar pesos aprendidos (mezcla 50/50 estadístico + aprendido)
+            // Integrar pesos aprendidos con mezcla adaptativa precalculada
             if (pesosAprendidos.isNotEmpty()) {
-                val m = 0.5
+                val m = mezclaAprendido
                 wChi = wChi * (1 - m) + (pesosAprendidos["chiCuadrado"] ?: 0.2) * m
                 wBayes = wBayes * (1 - m) + (pesosAprendidos["bayesiano"] ?: 0.2) * m
                 wFourier = wFourier * (1 - m) + (pesosAprendidos["fourier"] ?: 0.2) * m
@@ -3443,7 +3515,7 @@ class MotorInteligencia(private val context: Context? = null) {
         val perfectosYMaestros = convergencias
             .filter { it.momentoPerfecto || it.esMaestro }
             .map { it.numero }
-            .shuffled()
+            .shuffled(rnd)
             .take(cantidadNumeros)
         if (perfectosYMaestros.size == cantidadNumeros && usados.add(perfectosYMaestros.toSet())) {
             alternativas.add(perfectosYMaestros.sorted())
@@ -3560,7 +3632,7 @@ class MotorInteligencia(private val context: Context? = null) {
         val combinacion = if (topNumeros.size == cantidadNumeros) {
             topNumeros
         } else {
-            (1..maxNumero).shuffled().take(cantidadNumeros).sorted()
+            (1..maxNumero).shuffled(rnd).take(cantidadNumeros).sorted()
         }
 
         return ResultadoMetodoAbuelo(
@@ -3670,6 +3742,7 @@ class MotorInteligencia(private val context: Context? = null) {
         tipoLoteria: String = "PRIMITIVA"
     ): ResultadoEnsemble {
         cargarMemoria(tipoLoteria)
+        inicializarSemilla(tipoLoteria, historico)
 
         val car = extraerCaracteristicas(historico, maxNumero, tipoLoteria)
 
@@ -4155,7 +4228,7 @@ class MotorInteligencia(private val context: Context? = null) {
             val disponible = ordenados
                 .map { it.numero }
                 .filter { it !in seleccionados }
-                .firstOrNull() ?: (1..maxNumero).filter { it !in seleccionados }.randomOrNull() ?: break
+                .firstOrNull() ?: (1..maxNumero).filter { it !in seleccionados }.randomDetOrNull() ?: break
             seleccionados.add(disponible)
         }
 
@@ -4341,7 +4414,7 @@ class MotorInteligencia(private val context: Context? = null) {
         numReintegros: Int = 5
     ): List<ScoreComplementario> {
         if (historico.isEmpty()) {
-            return (0..9).shuffled().take(numReintegros).map { num ->
+            return (0..9).shuffled(rnd).take(numReintegros).map { num ->
                 ScoreComplementario(num, 50.0, 0, 0, 0, 10.0, 0.5, TipoRacha.NORMAL)
             }
         }
@@ -4362,7 +4435,7 @@ class MotorInteligencia(private val context: Context? = null) {
         numEstrellas: Int = 4
     ): List<ScoreComplementario> {
         if (historico.isEmpty()) {
-            return (1..12).shuffled().take(numEstrellas).map { num ->
+            return (1..12).shuffled(rnd).take(numEstrellas).map { num ->
                 ScoreComplementario(num, 50.0, 0, 0, 0, 6.0, 0.5, TipoRacha.NORMAL)
             }
         }
@@ -4386,7 +4459,7 @@ class MotorInteligencia(private val context: Context? = null) {
         numClaves: Int = 5
     ): List<ScoreComplementario> {
         if (historico.isEmpty()) {
-            return (0..9).shuffled().take(numClaves).map { num ->
+            return (0..9).shuffled(rnd).take(numClaves).map { num ->
                 ScoreComplementario(num, 50.0, 0, 0, 0, 10.0, 0.5, TipoRacha.NORMAL)
             }
         }
@@ -4924,20 +4997,20 @@ class MotorInteligencia(private val context: Context? = null) {
         // Sugerir un número par si todos son impares
         val pares = nums.count { it % 2 == 0 }
         if (pares == 0) {
-            val parSugerido = (2..maxNumero step 2).filter { it !in nums }.randomOrNull()
+            val parSugerido = (2..maxNumero step 2).filter { it !in nums }.randomDetOrNull()
             if (parSugerido != null) sugerencias.add(parSugerido)
         } else if (pares == nums.size) {
-            val imparSugerido = (1..maxNumero step 2).filter { it !in nums }.randomOrNull()
+            val imparSugerido = (1..maxNumero step 2).filter { it !in nums }.randomDetOrNull()
             if (imparSugerido != null) sugerencias.add(imparSugerido)
         }
 
         // Sugerir un número bajo si todos son altos
         val bajos = nums.count { it <= mitad }
         if (bajos == 0) {
-            val bajoSugerido = (1..mitad).filter { it !in nums }.randomOrNull()
+            val bajoSugerido = (1..mitad).filter { it !in nums }.randomDetOrNull()
             if (bajoSugerido != null) sugerencias.add(bajoSugerido)
         } else if (bajos == nums.size) {
-            val altoSugerido = ((mitad + 1)..maxNumero).filter { it !in nums }.randomOrNull()
+            val altoSugerido = ((mitad + 1)..maxNumero).filter { it !in nums }.randomDetOrNull()
             if (altoSugerido != null) sugerencias.add(altoSugerido)
         }
 
@@ -4945,10 +5018,10 @@ class MotorInteligencia(private val context: Context? = null) {
         val decenas = nums.map { it / 10 }.toSet()
         val decenasFaltantes = (0..(maxNumero / 10)).filter { it !in decenas }
         if (decenasFaltantes.isNotEmpty()) {
-            val decenaSugerida = decenasFaltantes.random()
+            val decenaSugerida = decenasFaltantes.randomDet()
             val numSugerido = ((decenaSugerida * 10).coerceAtLeast(1)..(decenaSugerida * 10 + 9).coerceAtMost(maxNumero))
                 .filter { it !in nums }
-                .randomOrNull()
+                .randomDetOrNull()
             if (numSugerido != null) sugerencias.add(numSugerido)
         }
 
@@ -4979,11 +5052,11 @@ class MotorInteligencia(private val context: Context? = null) {
 
         // Encontrar el número a reemplazar
         val numReemplazar = when {
-            pares == 0 -> nums.filter { it % 2 != 0 }.random()
-            pares == nums.size -> nums.filter { it % 2 == 0 }.random()
-            bajos == 0 -> nums.filter { it > mitad }.random()
-            bajos == nums.size -> nums.filter { it <= mitad }.random()
-            else -> nums.random()
+            pares == 0 -> nums.filter { it % 2 != 0 }.randomDet()
+            pares == nums.size -> nums.filter { it % 2 == 0 }.randomDet()
+            bajos == 0 -> nums.filter { it > mitad }.randomDet()
+            bajos == nums.size -> nums.filter { it <= mitad }.randomDet()
+            else -> nums.randomDet()
         }
 
         val nuevoNum = analisis.sugerenciasCorreccion.first()
@@ -5028,9 +5101,13 @@ class MotorInteligencia(private val context: Context? = null) {
 
         val hoy = java.time.LocalDate.now()
         val diaHoy = hoy.dayOfWeek.value // 1=Lunes, 7=Domingo
+        // Si hoy es día de sorteo pero ya pasaron las 22:00, empezar desde mañana
+        val horaLimite = java.time.LocalTime.of(22, 0)
+        val sorteoHoyYaPaso = diaHoy in diasSorteo && java.time.LocalTime.now() >= horaLimite
+        val inicio = if (sorteoHoyYaPaso) 1 else 0
 
         // Buscar el próximo día de sorteo
-        for (i in 0..7) {
+        for (i in inicio..7) {
             val diaBuscado = ((diaHoy - 1 + i) % 7) + 1
             if (diaBuscado in diasSorteo) {
                 return Pair(diaBuscado, nombresDias[diaBuscado - 1])

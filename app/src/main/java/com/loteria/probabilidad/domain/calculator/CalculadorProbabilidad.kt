@@ -5,25 +5,48 @@ import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.ml.MotorInteligencia
 import com.loteria.probabilidad.domain.ml.ResumenIA
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 /**
  * Calculador de probabilidades con múltiples métodos de análisis.
  * 
- * Métodos implementados:
+ * Métodos implementados (8):
+ * - METODO_ABUELO: Chi², Fourier, Bayes, Markov, Entropía
+ * - ENSEMBLE_VOTING: 8 estrategias votan por consenso
+ * - ALTA_CONFIANZA: 7 señales, solo números con alto consenso
  * - IA_GENETICA: Algoritmo genético con APRENDIZAJE PERSISTENTE
- * - LAPLACE: Probabilidad teórica matemática pura
+ * - RACHAS_MIX: Calientes + fríos + normales
  * - FRECUENCIAS: Basado en histórico de apariciones
- * - NUMEROS_CALIENTES: Los más frecuentes recientemente
  * - NUMEROS_FRIOS: Los menos frecuentes (teoría del equilibrio)
- * - EQUILIBRIO_ESTADISTICO: Mezcla de calientes y fríos
- * - PROBABILIDAD_CONDICIONAL: Números que salen juntos
- * - DESVIACION_MEDIA: Números alejados de su frecuencia esperada
- * - ALEATORIO_PURO: Selección completamente aleatoria
+ * - ALEATORIO_PURO: Selección completamente aleatoria (baseline)
  */
 class CalculadorProbabilidad(private val context: Context? = null) {
-    
+
     // Motor de IA con aprendizaje persistente
     private val motorIA = MotorInteligencia(context)
+
+    /** Random determinista: mismos datos → mismos resultados */
+    private var rnd: Random = Random(0)
+
+    private fun inicializarSemilla(tipoLoteria: String, historico: List<*>) {
+        val pesosHash = motorIA.getPesosCaracteristicas().entries.sumOf {
+            (it.key.hashCode().toLong() * 31 + (it.value * 1000000).toLong())
+        }
+        val entrenamientos = motorIA.getTotalEntrenamientos(tipoLoteria).toLong()
+        // Incluir pesos del Abuelo para que cambien las combinaciones tras entrenamiento abuelo
+        val pesosAbueloHash = motorIA.getPesosAbuelo(tipoLoteria).entries.sumOf {
+            (it.key.hashCode().toLong() * 31 + (it.value * 1000000).toLong())
+        }
+        val entrenamientosAbuelo = motorIA.getEntrenamientosAbuelo(tipoLoteria).toLong()
+        val hash = tipoLoteria.hashCode().toLong() * 31 + historico.size.toLong() * 17 +
+            (historico.lastOrNull()?.hashCode()?.toLong() ?: 0L) +
+            pesosHash + entrenamientos * 7 +
+            pesosAbueloHash * 13 + entrenamientosAbuelo * 11
+        rnd = Random(hash)
+    }
+
+    private fun <T> List<T>.randomDet(): T = this.random(rnd)
+    private fun IntRange.randomDet(): Int = this.random(rnd)
     
     /**
      * Hace que la IA aprenda de los resultados del backtesting.
@@ -51,6 +74,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int = 5
     ): AnalisisProbabilidad {
+        // Forzar recarga de pesos desde SharedPreferences (pueden haber cambiado por entrenamiento)
+        motorIA.recargarMemoria(tipoLoteria.name)
+        inicializarSemilla(tipoLoteria.name, historico)
         return when (tipoLoteria) {
             TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> {
                 @Suppress("UNCHECKED_CAST")
@@ -105,7 +131,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int
     ): AnalisisProbabilidad {
-        if (historico.isEmpty() && metodo != MetodoCalculo.LAPLACE && metodo != MetodoCalculo.ALEATORIO_PURO) {
+        if (historico.isEmpty() && metodo != MetodoCalculo.ALEATORIO_PURO) {
             return crearAnalisisVacio(tipoLoteria, metodo)
         }
 
@@ -120,7 +146,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val reintegrosPredichos = if (historico.isNotEmpty()) {
             motorIA.predecirReintegros(historico, numCombinaciones).map { it.numero }
         } else {
-            (0..9).shuffled().take(numCombinaciones)
+            (0..9).shuffled(rnd).take(numCombinaciones)
         }
         
         // Generar combinaciones según el método
@@ -177,13 +203,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligentes(
                 historico, maxNumero, cantidadNumeros, numCombinaciones, tipoLoteria.name
             )
-            MetodoCalculo.LAPLACE -> generarLaplace(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.NUMEROS_CALIENTES -> generarNumerosCalientes(historico, cantidadNumeros, numCombinaciones, maxNumero)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> generarEquilibrio(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicional(historico, cantidadNumeros, numCombinaciones, maxNumero)
-            MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
@@ -214,7 +235,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         // MEJORA 10: Añadir reintegro inteligente DIFERENTE a cada combinación
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
             val reintegro = reintegrosPredichos.getOrElse(index % reintegrosPredichos.size) {
-                (0..9).random()
+                (0..9).randomDet()
             }
             combinacion.copy(
                 complementarios = listOf(reintegro),
@@ -248,7 +269,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int
     ): AnalisisProbabilidad {
-        if (historico.isEmpty() && metodo != MetodoCalculo.LAPLACE && metodo != MetodoCalculo.ALEATORIO_PURO) {
+        if (historico.isEmpty() && metodo != MetodoCalculo.ALEATORIO_PURO) {
             return crearAnalisisVacio(TipoLoteria.EUROMILLONES, metodo)
         }
 
@@ -263,7 +284,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val estrellasPredichas = if (historico.isNotEmpty()) {
             motorIA.predecirEstrellas(historico, numCombinaciones * 2).map { it.numero }
         } else {
-            (1..12).shuffled().take(numCombinaciones * 2)
+            (1..12).shuffled(rnd).take(numCombinaciones * 2)
         }
 
         // Convertir a ResultadoPrimitiva para usar las funciones del motor
@@ -290,13 +311,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historicoConvertido, maxNumero, cantidadNumeros, "EURO") }
             }
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligenteEuro(historico, numCombinaciones)
-            MetodoCalculo.LAPLACE -> generarLaplace(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.NUMEROS_CALIENTES -> generarNumerosCalientesEuro(historico, numCombinaciones)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> generarEquilibrio(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicionalEuro(historico, numCombinaciones)
-            MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
@@ -324,13 +340,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
             // Usar estrellas predichas con rotación
             val offset = index * 2
-            val estrella1 = estrellasPredichas.getOrElse(offset % estrellasPredichas.size) { (1..12).random() }
-            val estrella2 = estrellasPredichas.getOrElse((offset + 1) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.random() }
+            val estrella1 = estrellasPredichas.getOrElse(offset % estrellasPredichas.size) { (1..12).randomDet() }
+            val estrella2 = estrellasPredichas.getOrElse((offset + 1) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.randomDet() }
             val estrellas = listOf(estrella1, estrella2).distinct().sorted()
 
             // Si son iguales, tomar la siguiente disponible
             val estrellasFinales = if (estrellas.size == 1) {
-                val siguiente = estrellasPredichas.getOrElse((offset + 2) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.random() }
+                val siguiente = estrellasPredichas.getOrElse((offset + 2) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.randomDet() }
                 listOf(estrella1, siguiente).sorted()
             } else {
                 estrellas
@@ -370,7 +386,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int
     ): AnalisisProbabilidad {
-        if (historico.isEmpty() && metodo != MetodoCalculo.LAPLACE && metodo != MetodoCalculo.ALEATORIO_PURO) {
+        if (historico.isEmpty() && metodo != MetodoCalculo.ALEATORIO_PURO) {
             return crearAnalisisVacio(TipoLoteria.GORDO_PRIMITIVA, metodo)
         }
 
@@ -384,7 +400,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val clavesPredichas = if (historico.isNotEmpty()) {
             motorIA.predecirNumeroClave(historico, numCombinaciones).map { it.numero }
         } else {
-            (0..9).shuffled().take(numCombinaciones)
+            (0..9).shuffled(rnd).take(numCombinaciones)
         }
 
         // Convertir a ResultadoPrimitiva para usar las funciones del motor
@@ -411,13 +427,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historicoConvertido, maxNumero, cantidadNumeros, "GORDO") }
             }
             MetodoCalculo.IA_GENETICA -> motorIA.generarCombinacionesInteligenteGordo(historico, numCombinaciones)
-            MetodoCalculo.LAPLACE -> generarLaplace(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.NUMEROS_CALIENTES -> generarNumerosCalientesGordo(historico, numCombinaciones)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> generarEquilibrio(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> generarCondicionalGordo(historico, numCombinaciones)
-            MetodoCalculo.DESVIACION_MEDIA -> generarDesviacionMedia(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size, maxNumero)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
@@ -444,7 +455,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         // MEJORA 10: Añadir número clave inteligente DIFERENTE a cada combinación
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
             val numeroClave = clavesPredichas.getOrElse(index % clavesPredichas.size) {
-                (0..9).random()
+                (0..9).randomDet()
             }
             combinacion.copy(
                 complementarios = listOf(numeroClave),
@@ -478,7 +489,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int
     ): AnalisisProbabilidad {
-        if (historico.isEmpty() && metodo != MetodoCalculo.LAPLACE && metodo != MetodoCalculo.ALEATORIO_PURO) {
+        if (historico.isEmpty() && metodo != MetodoCalculo.ALEATORIO_PURO) {
             return crearAnalisisVacio(tipoLoteria, metodo)
         }
 
@@ -488,45 +499,33 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         // Posición 3: Decenas, Posición 4: Unidades
         
         val frecuenciasPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
-        val frecuenciasRecientesPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
-        
+
         // Inicializar con ceros
         for (pos in 0..4) {
             for (digito in 0..9) {
                 frecuenciasPorPosicion[pos][digito] = 0
-                frecuenciasRecientesPorPosicion[pos][digito] = 0
             }
         }
-        
+
         // Contar frecuencias de cada dígito en cada posición
         historico.forEach { resultado ->
             val numero = resultado.primerPremio.padStart(5, '0')
             numero.forEachIndexed { posicion, char ->
                 val digito = char.digitToIntOrNull() ?: return@forEachIndexed
-                frecuenciasPorPosicion[posicion][digito] = 
+                frecuenciasPorPosicion[posicion][digito] =
                     (frecuenciasPorPosicion[posicion][digito] ?: 0) + 1
             }
         }
-        
-        // Contar frecuencias recientes (últimos 50 sorteos)
-        historico.take(50).forEach { resultado ->
-            val numero = resultado.primerPremio.padStart(5, '0')
-            numero.forEachIndexed { posicion, char ->
-                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
-                frecuenciasRecientesPorPosicion[posicion][digito] = 
-                    (frecuenciasRecientesPorPosicion[posicion][digito] ?: 0) + 1
-            }
-        }
-        
+
         // Análisis de terminaciones (últimas 2 cifras) para compatibilidad
         val terminaciones = historico.mapNotNull { it.primerPremio.takeLast(2).toIntOrNull() }
         val frecuenciasTerminaciones = contarFrecuencias(terminaciones, 0..99)
         val frecuenciasReintegros = contarFrecuencias(historico.flatMap { it.reintegros }, 0..9)
 
         val combinaciones = when (metodo) {
-            MetodoCalculo.LAPLACE, MetodoCalculo.ALEATORIO_PURO -> {
+            MetodoCalculo.ALEATORIO_PURO -> {
                 (0 until numCombinaciones).map {
-                    val numero = (0..99999).random()
+                    val numero = (0..99999).randomDet()
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = 0.001,
@@ -537,47 +536,21 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> {
                 // Usar el dígito MÁS FRECUENTE en cada posición
                 generarNumerosOptimos(
-                    frecuenciasPorPosicion, 
-                    numCombinaciones, 
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
                     historico.size,
                     "📊 Frecuencias",
-                    seleccionarMasFrecuentes = true
-                )
-            }
-            MetodoCalculo.NUMEROS_CALIENTES -> {
-                // Usar dígitos más frecuentes en los últimos 50 sorteos
-                generarNumerosOptimos(
-                    frecuenciasRecientesPorPosicion, 
-                    numCombinaciones, 
-                    minOf(50, historico.size),
-                    "🔥 Calientes",
                     seleccionarMasFrecuentes = true
                 )
             }
             MetodoCalculo.NUMEROS_FRIOS -> {
                 // Usar dígitos MENOS frecuentes (teoría del equilibrio)
                 generarNumerosOptimos(
-                    frecuenciasPorPosicion, 
-                    numCombinaciones, 
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
                     historico.size,
                     "❄️ Fríos",
                     seleccionarMasFrecuentes = false
-                )
-            }
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
-                // Mezcla: 3 posiciones frecuentes, 2 posiciones frías
-                generarNumerosMixtos(
-                    frecuenciasPorPosicion,
-                    numCombinaciones,
-                    historico.size
-                )
-            }
-            MetodoCalculo.DESVIACION_MEDIA -> {
-                // Dígitos más alejados de la media esperada (10%)
-                generarNumerosDesviacion(
-                    frecuenciasPorPosicion,
-                    numCombinaciones,
-                    historico.size
                 )
             }
             else -> {
@@ -587,7 +560,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     .map { it.key }
                     
                 (0 until numCombinaciones).map { index ->
-                    val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).random() }
+                    val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).randomDet() }
                     val frecuencia = frecuenciasTerminaciones[terminacion] ?: 0
                     
                     // Generar prefijo usando dígitos frecuentes
@@ -669,89 +642,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
     
     /**
-     * Genera números mixtos: algunas posiciones frecuentes, otras frías.
-     */
-    private fun generarNumerosMixtos(
-        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
-        numCombinaciones: Int,
-        totalSorteos: Int
-    ): List<CombinacionSugerida> {
-        val combinaciones = mutableListOf<CombinacionSugerida>()
-        val numerosGenerados = mutableSetOf<Int>()
-        
-        repeat(numCombinaciones) { index ->
-            var numero: Int
-            var intentos = 0
-            
-            do {
-                // Alternar: posiciones 0,2,4 frecuentes, posiciones 1,3 frías
-                val digitos = (0..4).map { pos ->
-                    val usarFrecuente = (pos + index) % 2 == 0
-                    obtenerDigitoRanked(frecuenciasPorPosicion[pos], index + intentos, usarFrecuente)
-                }
-                numero = digitos[0] * 10000 + digitos[1] * 1000 + digitos[2] * 100 + digitos[3] * 10 + digitos[4]
-                intentos++
-            } while (numero in numerosGenerados && intentos < 20)
-            
-            numerosGenerados.add(numero)
-            val puntuacion = calcularPuntuacionNumero(numero, frecuenciasPorPosicion, totalSorteos)
-            
-            combinaciones.add(CombinacionSugerida(
-                numeros = listOf(numero),
-                probabilidadRelativa = puntuacion,
-                explicacion = "⚖️ Equilibrio: ${numero.toString().padStart(5, '0')} | Score: ${puntuacion.roundTo(1)}%"
-            ))
-        }
-        
-        return combinaciones
-    }
-    
-    /**
-     * Genera números basándose en la desviación de la media esperada.
-     */
-    private fun generarNumerosDesviacion(
-        frecuenciasPorPosicion: Array<MutableMap<Int, Int>>,
-        numCombinaciones: Int,
-        totalSorteos: Int
-    ): List<CombinacionSugerida> {
-        val mediaEsperada = totalSorteos / 10.0 // Cada dígito debería aparecer 10% de las veces
-        
-        // Para cada posición, calcular desviación de cada dígito
-        val desviacionesPorPosicion = Array(5) { pos ->
-            frecuenciasPorPosicion[pos].map { (digito, freq) ->
-                digito to kotlin.math.abs(freq - mediaEsperada)
-            }.sortedByDescending { it.second }
-        }
-        
-        val combinaciones = mutableListOf<CombinacionSugerida>()
-        val numerosGenerados = mutableSetOf<Int>()
-        
-        repeat(numCombinaciones) { index ->
-            var numero: Int
-            var intentos = 0
-            
-            do {
-                val digitos = (0..4).map { pos ->
-                    desviacionesPorPosicion[pos].getOrNull(index + intentos)?.first ?: (0..9).random()
-                }
-                numero = digitos[0] * 10000 + digitos[1] * 1000 + digitos[2] * 100 + digitos[3] * 10 + digitos[4]
-                intentos++
-            } while (numero in numerosGenerados && intentos < 20)
-            
-            numerosGenerados.add(numero)
-            val puntuacion = calcularPuntuacionNumero(numero, frecuenciasPorPosicion, totalSorteos)
-            
-            combinaciones.add(CombinacionSugerida(
-                numeros = listOf(numero),
-                probabilidadRelativa = puntuacion,
-                explicacion = "📈 Desviación: ${numero.toString().padStart(5, '0')} | Score: ${puntuacion.roundTo(1)}%"
-            ))
-        }
-        
-        return combinaciones
-    }
-    
-    /**
      * Obtiene el dígito en el ranking especificado.
      */
     private fun obtenerDigitoRanked(
@@ -764,7 +654,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         } else {
             frecuencias.entries.sortedBy { it.value }
         }
-        return ordenados.getOrNull(rank % 10)?.key ?: (0..9).random()
+        return ordenados.getOrNull(rank % 10)?.key ?: (0..9).randomDet()
     }
     
     /**
@@ -772,7 +662,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     private fun obtenerDigitoTop(frecuencias: Map<Int, Int>, offset: Int): Int {
         val ordenados = frecuencias.entries.sortedByDescending { it.value }
-        return ordenados.getOrNull(offset % 10)?.key ?: (0..9).random()
+        return ordenados.getOrNull(offset % 10)?.key ?: (0..9).randomDet()
     }
     
     /**
@@ -828,39 +718,27 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         metodo: MetodoCalculo,
         numCombinaciones: Int
     ): AnalisisProbabilidad {
-        if (historico.isEmpty() && metodo != MetodoCalculo.LAPLACE && metodo != MetodoCalculo.ALEATORIO_PURO) {
+        if (historico.isEmpty() && metodo != MetodoCalculo.ALEATORIO_PURO) {
             return crearAnalisisVacio(TipoLoteria.NAVIDAD, metodo)
         }
 
         // ==================== ANÁLISIS DE FRECUENCIAS POR POSICIÓN ====================
         val frecuenciasPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
-        val frecuenciasRecientesPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
-        
+
         // Inicializar con ceros
         for (pos in 0..4) {
             for (digito in 0..9) {
                 frecuenciasPorPosicion[pos][digito] = 0
-                frecuenciasRecientesPorPosicion[pos][digito] = 0
             }
         }
-        
+
         // Contar frecuencias de cada dígito en cada posición (El Gordo)
         historico.forEach { resultado ->
             val numero = resultado.gordo.padStart(5, '0')
             numero.forEachIndexed { posicion, char ->
                 val digito = char.digitToIntOrNull() ?: return@forEachIndexed
-                frecuenciasPorPosicion[posicion][digito] = 
+                frecuenciasPorPosicion[posicion][digito] =
                     (frecuenciasPorPosicion[posicion][digito] ?: 0) + 1
-            }
-        }
-        
-        // Frecuencias recientes (últimos 20 sorteos para Navidad)
-        historico.take(20).forEach { resultado ->
-            val numero = resultado.gordo.padStart(5, '0')
-            numero.forEachIndexed { posicion, char ->
-                val digito = char.digitToIntOrNull() ?: return@forEachIndexed
-                frecuenciasRecientesPorPosicion[posicion][digito] = 
-                    (frecuenciasRecientesPorPosicion[posicion][digito] ?: 0) + 1
             }
         }
 
@@ -869,9 +747,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val frecuenciasReintegros = contarFrecuencias(historico.flatMap { it.reintegros }, 0..9)
 
         val combinaciones = when (metodo) {
-            MetodoCalculo.LAPLACE, MetodoCalculo.ALEATORIO_PURO -> {
+            MetodoCalculo.ALEATORIO_PURO -> {
                 (0 until numCombinaciones).map {
-                    val numero = (0..99999).random()
+                    val numero = (0..99999).randomDet()
                     CombinacionSugerida(
                         numeros = listOf(numero),
                         probabilidadRelativa = 0.001,
@@ -881,43 +759,20 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
             MetodoCalculo.FRECUENCIAS -> {
                 generarNumerosOptimos(
-                    frecuenciasPorPosicion, 
-                    numCombinaciones, 
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
                     historico.size,
                     "📊 Frecuencias",
                     seleccionarMasFrecuentes = true
                 )
             }
-            MetodoCalculo.NUMEROS_CALIENTES -> {
-                generarNumerosOptimos(
-                    frecuenciasRecientesPorPosicion, 
-                    numCombinaciones, 
-                    minOf(20, historico.size),
-                    "🔥 Calientes",
-                    seleccionarMasFrecuentes = true
-                )
-            }
             MetodoCalculo.NUMEROS_FRIOS -> {
                 generarNumerosOptimos(
-                    frecuenciasPorPosicion, 
-                    numCombinaciones, 
+                    frecuenciasPorPosicion,
+                    numCombinaciones,
                     historico.size,
                     "❄️ Fríos",
                     seleccionarMasFrecuentes = false
-                )
-            }
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
-                generarNumerosMixtos(
-                    frecuenciasPorPosicion,
-                    numCombinaciones,
-                    historico.size
-                )
-            }
-            MetodoCalculo.DESVIACION_MEDIA -> {
-                generarNumerosDesviacion(
-                    frecuenciasPorPosicion,
-                    numCombinaciones,
-                    historico.size
                 )
             }
             else -> {
@@ -926,7 +781,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     .map { it.key }
                     
                 (0 until numCombinaciones).map { index ->
-                    val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).random() }
+                    val terminacion = terminacionesOrdenadas.getOrElse(index) { (0..99).randomDet() }
                     val frecuencia = frecuenciasTerminaciones[terminacion] ?: 0
                     
                     val dig0 = obtenerDigitoTop(frecuenciasPorPosicion[0], index)
@@ -965,23 +820,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
 
     // ==================== MÉTODOS DE GENERACIÓN ====================
-    
-    /**
-     * LAPLACE: Todos los números tienen la misma probabilidad.
-     * Genera combinaciones aleatorias puras pero muestra la probabilidad teórica.
-     */
-    private fun generarLaplace(maxNumero: Int, cantidad: Int, numCombinaciones: Int): List<CombinacionSugerida> {
-        val probabilidad = calcularProbabilidadLaplaceNumero(maxNumero, cantidad)
-        
-        return (0 until numCombinaciones).map {
-            val numeros = (1..maxNumero).shuffled().take(cantidad).sorted()
-            CombinacionSugerida(
-                numeros = numeros,
-                probabilidadRelativa = probabilidad,
-                explicacion = "Laplace: P = ${"%.10f".format(probabilidad / 100)}%"
-            )
-        }
-    }
 
     /**
      * FRECUENCIAS: Prioriza números que han salido más veces.
@@ -998,11 +836,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             val offset = index * 2
             val numerosSeleccionados = numerosOrdenados
                 .drop(offset)
-                .take(20)
-                .shuffled()
                 .take(cantidad)
                 .sorted()
-            
+
             val puntuacion = numerosSeleccionados.sumOf { frecuencias.getOrDefault(it, 0) }
                 .toDouble() / (totalSorteos * cantidad) * 100
 
@@ -1011,48 +847,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 probabilidadRelativa = puntuacion.roundTo(2),
                 explicacion = "Frecuencia histórica: ${puntuacion.roundTo(1)}%"
             )
-        }
-    }
-
-    /**
-     * NÚMEROS CALIENTES: Los más frecuentes en los últimos N sorteos.
-     */
-    private fun generarNumerosCalientes(
-        historico: List<ResultadoPrimitiva>,
-        cantidad: Int,
-        numCombinaciones: Int,
-        maxNumero: Int,
-        ultimosSorteos: Int = 50
-    ): List<CombinacionSugerida> {
-        val recientes = historico.take(ultimosSorteos)
-        val frecuenciasRecientes = contarFrecuencias(recientes.flatMap { it.numeros }, 1..maxNumero)
-        
-        return generarPorFrecuencias(frecuenciasRecientes, cantidad, numCombinaciones, recientes.size).map {
-            it.copy(explicacion = "Calientes (últimos $ultimosSorteos sorteos)")
-        }
-    }
-
-    private fun generarNumerosCalientesEuro(
-        historico: List<ResultadoEuromillones>,
-        numCombinaciones: Int,
-        ultimosSorteos: Int = 50
-    ): List<CombinacionSugerida> {
-        val recientes = historico.take(ultimosSorteos)
-        val frecuenciasRecientes = contarFrecuencias(recientes.flatMap { it.numeros }, 1..50)
-        return generarPorFrecuencias(frecuenciasRecientes, 5, numCombinaciones, recientes.size).map {
-            it.copy(explicacion = "Calientes (últimos $ultimosSorteos sorteos)")
-        }
-    }
-
-    private fun generarNumerosCalientesGordo(
-        historico: List<ResultadoGordoPrimitiva>,
-        numCombinaciones: Int,
-        ultimosSorteos: Int = 50
-    ): List<CombinacionSugerida> {
-        val recientes = historico.take(ultimosSorteos)
-        val frecuenciasRecientes = contarFrecuencias(recientes.flatMap { it.numeros }, 1..54)
-        return generarPorFrecuencias(frecuenciasRecientes, 5, numCombinaciones, recientes.size).map {
-            it.copy(explicacion = "Calientes (últimos $ultimosSorteos sorteos)")
         }
     }
 
@@ -1072,8 +866,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             val offset = index * 2
             val numerosSeleccionados = numerosOrdenados
                 .drop(offset)
-                .take(20)
-                .shuffled()
                 .take(cantidad)
                 .sorted()
 
@@ -1086,182 +878,11 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
 
     /**
-     * EQUILIBRIO: Mezcla de números calientes y fríos.
-     */
-    private fun generarEquilibrio(
-        frecuencias: Map<Int, Int>,
-        cantidad: Int,
-        numCombinaciones: Int,
-        totalSorteos: Int
-    ): List<CombinacionSugerida> {
-        val ordenados = frecuencias.entries.sortedByDescending { it.value }.map { it.key }
-        val calientes = ordenados.take(ordenados.size / 2)
-        val frios = ordenados.drop(ordenados.size / 2)
-        
-        return (0 until numCombinaciones).map {
-            val mitadCalientes = cantidad / 2
-            val mitadFrios = cantidad - mitadCalientes
-            
-            val numerosCalientes = calientes.shuffled().take(mitadCalientes)
-            val numerosFrios = frios.shuffled().take(mitadFrios)
-            val numeros = (numerosCalientes + numerosFrios).sorted()
-
-            CombinacionSugerida(
-                numeros = numeros,
-                probabilidadRelativa = 50.0,
-                explicacion = "Equilibrio: $mitadCalientes calientes + $mitadFrios fríos"
-            )
-        }
-    }
-
-    /**
-     * PROBABILIDAD CONDICIONAL: Números que suelen salir juntos.
-     */
-    private fun generarCondicional(
-        historico: List<ResultadoPrimitiva>,
-        cantidad: Int,
-        numCombinaciones: Int,
-        maxNumero: Int
-    ): List<CombinacionSugerida> {
-        // Analizar pares de números que salen juntos
-        val paresFrecuentes = mutableMapOf<Pair<Int, Int>, Int>()
-        
-        historico.forEach { sorteo ->
-            val nums = sorteo.numeros.sorted()
-            for (i in nums.indices) {
-                for (j in i + 1 until nums.size) {
-                    val par = Pair(nums[i], nums[j])
-                    paresFrecuentes[par] = paresFrecuentes.getOrDefault(par, 0) + 1
-                }
-            }
-        }
-        
-        val mejoresPares = paresFrecuentes.entries.sortedByDescending { it.value }.take(30)
-        
-        return (0 until numCombinaciones).map { index ->
-            val numerosBase = mutableSetOf<Int>()
-            
-            // Tomar números de los pares más frecuentes
-            mejoresPares.drop(index * 3).take(5).forEach { (par, _) ->
-                numerosBase.add(par.first)
-                numerosBase.add(par.second)
-            }
-            
-            // Completar si faltan
-            while (numerosBase.size < cantidad) {
-                numerosBase.add((1..maxNumero).random())
-            }
-            
-            val numeros = numerosBase.take(cantidad).sorted()
-
-            CombinacionSugerida(
-                numeros = numeros,
-                probabilidadRelativa = 55.0,
-                explicacion = "Condicional: números que suelen salir juntos"
-            )
-        }
-    }
-
-    private fun generarCondicionalEuro(
-        historico: List<ResultadoEuromillones>,
-        numCombinaciones: Int
-    ): List<CombinacionSugerida> {
-        val paresFrecuentes = mutableMapOf<Pair<Int, Int>, Int>()
-        historico.forEach { sorteo ->
-            val nums = sorteo.numeros.sorted()
-            for (i in nums.indices) {
-                for (j in i + 1 until nums.size) {
-                    val par = Pair(nums[i], nums[j])
-                    paresFrecuentes[par] = paresFrecuentes.getOrDefault(par, 0) + 1
-                }
-            }
-        }
-        
-        return (0 until numCombinaciones).map { index ->
-            val numerosBase = mutableSetOf<Int>()
-            paresFrecuentes.entries.sortedByDescending { it.value }.drop(index * 2).take(4).forEach {
-                numerosBase.add(it.key.first)
-                numerosBase.add(it.key.second)
-            }
-            while (numerosBase.size < 5) numerosBase.add((1..50).random())
-            
-            CombinacionSugerida(
-                numeros = numerosBase.take(5).sorted(),
-                probabilidadRelativa = 55.0,
-                explicacion = "Condicional: números que suelen salir juntos"
-            )
-        }
-    }
-
-    private fun generarCondicionalGordo(
-        historico: List<ResultadoGordoPrimitiva>,
-        numCombinaciones: Int
-    ): List<CombinacionSugerida> {
-        val paresFrecuentes = mutableMapOf<Pair<Int, Int>, Int>()
-        historico.forEach { sorteo ->
-            val nums = sorteo.numeros.sorted()
-            for (i in nums.indices) {
-                for (j in i + 1 until nums.size) {
-                    paresFrecuentes[Pair(nums[i], nums[j])] = 
-                        paresFrecuentes.getOrDefault(Pair(nums[i], nums[j]), 0) + 1
-                }
-            }
-        }
-        
-        return (0 until numCombinaciones).map { index ->
-            val numerosBase = mutableSetOf<Int>()
-            paresFrecuentes.entries.sortedByDescending { it.value }.drop(index * 2).take(4).forEach {
-                numerosBase.add(it.key.first)
-                numerosBase.add(it.key.second)
-            }
-            while (numerosBase.size < 5) numerosBase.add((1..54).random())
-            
-            CombinacionSugerida(
-                numeros = numerosBase.take(5).sorted(),
-                probabilidadRelativa = 55.0,
-                explicacion = "Condicional: números que suelen salir juntos"
-            )
-        }
-    }
-
-    /**
-     * DESVIACIÓN DE LA MEDIA: Números alejados de su frecuencia esperada.
-     */
-    private fun generarDesviacionMedia(
-        frecuencias: Map<Int, Int>,
-        cantidad: Int,
-        numCombinaciones: Int,
-        totalSorteos: Int,
-        maxNumero: Int
-    ): List<CombinacionSugerida> {
-        // Frecuencia esperada según Laplace
-        val frecuenciaEsperada = (totalSorteos * cantidad).toDouble() / maxNumero
-        
-        // Calcular desviación de cada número
-        val desviaciones = frecuencias.map { (numero, freq) ->
-            numero to (freq - frecuenciaEsperada)
-        }.sortedByDescending { kotlin.math.abs(it.second) }
-        
-        // Tomar los más desviados (por debajo de la media = "les toca")
-        val porDebajoMedia = desviaciones.filter { it.second < 0 }.map { it.first }
-        
-        return (0 until numCombinaciones).map { index ->
-            val numeros = porDebajoMedia.drop(index * 2).take(cantidad * 2).shuffled().take(cantidad).sorted()
-
-            CombinacionSugerida(
-                numeros = numeros.ifEmpty { (1..maxNumero).shuffled().take(cantidad).sorted() },
-                probabilidadRelativa = 50.0,
-                explicacion = "Desviación media: por debajo de frecuencia esperada"
-            )
-        }
-    }
-
-    /**
      * ALEATORIO PURO: Completamente al azar.
      */
     private fun generarAleatorio(maxNumero: Int, cantidad: Int, numCombinaciones: Int): List<CombinacionSugerida> {
         return (0 until numCombinaciones).map {
-            val numeros = (1..maxNumero).shuffled().take(cantidad).sorted()
+            val numeros = (1..maxNumero).shuffled(rnd).take(cantidad).sorted()
             CombinacionSugerida(
                 numeros = numeros,
                 probabilidadRelativa = 50.0,
@@ -1310,11 +931,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         return "1 entre ${formatearNumeroBig(combinaciones)} (${formatearPorcentaje(probabilidad * 100)})"
     }
 
-    private fun calcularProbabilidadLaplaceNumero(n: Int, r: Int): Double {
-        val combinaciones = calcularCombinaciones(n, r)
-        return 1.0 / combinaciones.toDouble() * 100
-    }
-    
     /**
      * Calcula C(n,r) usando BigInteger para evitar overflow.
      * C(n,r) = n! / (r! * (n-r)!)
@@ -1388,12 +1004,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     fun ejecutarBacktestPrimitiva(
         historico: List<ResultadoPrimitiva>,
         diasAtras: Int = 10,
-        tipoLoteria: String = "PRIMITIVA"
+        tipoLoteria: String = "PRIMITIVA",
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> {
         if (historico.size <= diasAtras) return emptyList()
-        
+
         val resultados = mutableListOf<ResultadoBacktest>()
-        val metodos = MetodoCalculo.values()
+        val metodos = metodosAEvaluar
         val totalCombsPorMetodo = diasAtras * 5
         val totalCombs = metodos.size * totalCombsPorMetodo
         var combinacionGlobal = 0
@@ -1510,14 +1127,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     topNums.drop(i).take(cantidadNumeros).sorted()
                 }
             }
-            MetodoCalculo.NUMEROS_CALIENTES -> {
-                // Números de los últimos sorteos
-                val recientes = historico.take(10).flatMap { it.numeros }.groupingBy { it }.eachCount()
-                val calientes = recientes.entries.sortedByDescending { it.value }.take(20).map { it.key }
-                (0 until numCombinaciones).map { i ->
-                    calientes.drop(i).take(cantidadNumeros).sorted()
-                }
-            }
             MetodoCalculo.NUMEROS_FRIOS -> {
                 // Números menos frecuentes
                 val frios = frecuencias.entries.sortedBy { it.value }.take(20).map { it.key }
@@ -1525,40 +1134,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     frios.drop(i).take(cantidadNumeros).sorted()
                 }
             }
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
-                // Mix de calientes y fríos
-                val ordenados = frecuencias.entries.sortedByDescending { it.value }
-                val calientes = ordenados.take(10).map { it.key }
-                val frios = ordenados.takeLast(10).map { it.key }
-                (0 until numCombinaciones).map { i ->
-                    (calientes.take(3) + frios.take(3)).shuffled().take(cantidadNumeros).sorted()
-                }
-            }
-            MetodoCalculo.LAPLACE -> {
-                // Distribución uniforme por rotación
-                (0 until numCombinaciones).map { i ->
-                    val offset = i * 7
-                    (1..cantidadNumeros).map { j -> ((offset + j * 8) % maxNumero) + 1 }.sorted()
-                }
-            }
             MetodoCalculo.ALEATORIO_PURO -> {
                 (0 until numCombinaciones).map {
-                    (1..maxNumero).shuffled().take(cantidadNumeros).sorted()
-                }
-            }
-            MetodoCalculo.DESVIACION_MEDIA -> {
-                val media = frecuencias.entries.sumOf { it.value } / frecuencias.size.coerceAtLeast(1)
-                val cercanos = frecuencias.entries.sortedBy { kotlin.math.abs(it.value - media) }.take(20).map { it.key }
-                (0 until numCombinaciones).map { i ->
-                    cercanos.drop(i).take(cantidadNumeros).sorted()
-                }
-            }
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> {
-                // Basado en último sorteo
-                val ultimo = historico.firstOrNull()?.numeros ?: listOf(1,2,3,4,5,6)
-                val candidatos = (1..maxNumero).filter { it !in ultimo }
-                (0 until numCombinaciones).map { i ->
-                    candidatos.shuffled().take(cantidadNumeros).sorted()
+                    (1..maxNumero).shuffled(rnd).take(cantidadNumeros).sorted()
                 }
             }
             MetodoCalculo.IA_GENETICA -> {
@@ -1589,12 +1167,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     fun ejecutarBacktestEuromillones(
         historico: List<ResultadoEuromillones>,
-        diasAtras: Int = 10
+        diasAtras: Int = 10,
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> {
         if (historico.size <= diasAtras) return emptyList()
-        
+
         val resultados = mutableListOf<ResultadoBacktest>()
-        val metodos = MetodoCalculo.values()
+        val metodos = metodosAEvaluar
         val totalCombs = metodos.size * diasAtras * 5
         var combinacionGlobal = 0
         
@@ -1690,8 +1269,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             val nums = when (metodo) {
                 MetodoCalculo.FRECUENCIAS -> topNums.drop(i).take(5)
                 MetodoCalculo.NUMEROS_FRIOS -> topNums.reversed().drop(i).take(5)
-                MetodoCalculo.LAPLACE -> (1..5).map { j -> ((i * 7 + j * 10) % 50) + 1 }
-                MetodoCalculo.ALEATORIO_PURO -> (1..50).shuffled().take(5)
+                MetodoCalculo.ALEATORIO_PURO -> (1..50).shuffled(rnd).take(5)
                 else -> topNums.drop(i).take(5)
             }.sorted()
             
@@ -1709,12 +1287,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     fun ejecutarBacktestGordo(
         historico: List<ResultadoGordoPrimitiva>,
-        diasAtras: Int = 10
+        diasAtras: Int = 10,
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> {
         if (historico.size <= diasAtras) return emptyList()
-        
+
         val resultados = mutableListOf<ResultadoBacktest>()
-        val metodos = MetodoCalculo.values()
+        val metodos = metodosAEvaluar
         val totalCombs = metodos.size * diasAtras * 5
         var combinacionGlobal = 0
         
@@ -1743,7 +1322,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val combinaciones = when (metodo) {
                     MetodoCalculo.FRECUENCIAS -> (0 until 5).map { j -> topNums.drop(j).take(5).sorted() }
                     MetodoCalculo.NUMEROS_FRIOS -> (0 until 5).map { j -> topNums.reversed().drop(j).take(5).sorted() }
-                    MetodoCalculo.ALEATORIO_PURO -> (0 until 5).map { (1..54).shuffled().take(5).sorted() }
+                    MetodoCalculo.ALEATORIO_PURO -> (0 until 5).map { (1..54).shuffled(rnd).take(5).sorted() }
                     else -> (0 until 5).map { j -> topNums.drop(j).take(5).sorted() }
                 }
                 
@@ -1802,13 +1381,14 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     fun ejecutarBacktestNacional(
         historico: List<ResultadoNacional>,
         diasAtras: Int = 10,
-        tipoLoteria: String = "LOTERIA_NACIONAL"
+        tipoLoteria: String = "LOTERIA_NACIONAL",
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> {
         val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
         if (historico.size < 3) return emptyList()
-        
+
         val resultados = mutableListOf<ResultadoBacktest>()
-        val metodos = MetodoCalculo.values()
+        val metodos = metodosAEvaluar
         val totalCombs = metodos.size * diasEfectivos * 5
         var combinacionGlobal = 0
         
@@ -1920,7 +1500,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val terminaciones = historico.mapNotNull { 
             it.primerPremio.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
         }
-        if (terminaciones.isEmpty()) return (0..99).shuffled().take(5)
+        if (terminaciones.isEmpty()) return (0..99).shuffled(rnd).take(5)
         
         return when (metodo) {
             MetodoCalculo.IA_GENETICA -> {
@@ -1928,7 +1508,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val porFrec = terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }.take(4).map { it.key }
                 val porRecientes = terminaciones.take(3)
-                val noSalieron = (0..99).filter { it !in terminaciones }.shuffled().take(3)
+                val noSalieron = (0..99).filter { it !in terminaciones }.shuffled(rnd).take(3)
                 (porFrec + porRecientes + noSalieron).distinct().take(10)
             }
             MetodoCalculo.FRECUENCIAS -> {
@@ -1936,13 +1516,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
                     .take(10).map { it.key }
-            }
-            MetodoCalculo.NUMEROS_CALIENTES -> {
-                // Terminaciones más frecuentes en sorteos recientes
-                val recientes = terminaciones.take(10)
-                recientes.groupingBy { it }.eachCount()
-                    .entries.sortedByDescending { it.value }
-                    .map { it.key }.take(10)
             }
             MetodoCalculo.NUMEROS_FRIOS -> {
                 // Terminaciones con mayor gap (más tiempo sin salir)
@@ -1952,37 +1525,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     .sortedBy { ultimaAparicion[it] ?: 0 }
                     .take(10)
             }
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
-                // Balance entre frecuentes e infrecuentes
-                val frecuencias = terminaciones.groupingBy { it }.eachCount()
-                val frecuentes = frecuencias.entries.sortedByDescending { it.value }.take(5).map { it.key }
-                val infrecuentes = (0..99).filter { it !in frecuencias.keys }.shuffled().take(5)
-                frecuentes + infrecuentes
-            }
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> {
-                // Terminaciones consecutivas a las últimas
-                val ultima = terminaciones.firstOrNull() ?: 50
-                listOf(
-                    (ultima + 1) % 100, (ultima - 1 + 100) % 100,
-                    (ultima + 10) % 100, (ultima - 10 + 100) % 100,
-                    (ultima + 11) % 100
-                ) + terminaciones.take(5)
-            }
-            MetodoCalculo.DESVIACION_MEDIA -> {
-                // Terminaciones cuya suma de dígitos sea similar a la media
-                val sumaMedia = terminaciones.take(10).map { it / 10 + it % 10 }.average().toInt()
-                (0..99).filter { (it / 10 + it % 10) in (sumaMedia - 2)..(sumaMedia + 2) }
-                    .shuffled().take(10)
-            }
-            MetodoCalculo.LAPLACE -> {
-                // Todos tienen la misma probabilidad, rotar por decenas
-                val ultimaDecena = (terminaciones.firstOrNull() ?: 0) / 10
-                val siguienteDecena = (ultimaDecena + 1) % 10
-                (siguienteDecena * 10 until siguienteDecena * 10 + 10).toList()
-            }
             MetodoCalculo.ALEATORIO_PURO -> {
                 // Completamente aleatorio
-                (0..99).shuffled().take(10)
+                (0..99).shuffled(rnd).take(10)
             }
             MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
@@ -1999,13 +1544,14 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      */
     fun ejecutarBacktestNavidad(
         historico: List<ResultadoNavidad>,
-        diasAtras: Int = 10
+        diasAtras: Int = 10,
+        metodosAEvaluar: Array<MetodoCalculo> = MetodoCalculo.values()
     ): List<ResultadoBacktest> {
         val diasEfectivos = diasAtras.coerceAtMost(historico.size - 2).coerceAtLeast(1)
         if (historico.size < 3) return emptyList()
-        
+
         val resultados = mutableListOf<ResultadoBacktest>()
-        val metodos = MetodoCalculo.values()
+        val metodos = metodosAEvaluar
         val totalCombs = metodos.size * diasEfectivos * 5
         var combinacionGlobal = 0
         
@@ -2095,7 +1641,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val terminaciones = historico.mapNotNull { 
             it.gordo.filter { c -> c.isDigit() }.takeLast(2).toIntOrNull() 
         }
-        if (terminaciones.isEmpty()) return (0..99).shuffled().take(5)
+        if (terminaciones.isEmpty()) return (0..99).shuffled(rnd).take(5)
         
         return when (metodo) {
             MetodoCalculo.IA_GENETICA -> {
@@ -2103,19 +1649,13 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val porFrec = terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }.take(4).map { it.key }
                 val porRecientes = terminaciones.take(3)
-                val porDecenas = terminaciones.map { it / 10 }.distinct().take(3).map { it * 10 + (0..9).random() }
+                val porDecenas = terminaciones.map { it / 10 }.distinct().take(3).map { it * 10 + (0..9).randomDet() }
                 (porFrec + porRecientes + porDecenas).distinct().take(10)
             }
             MetodoCalculo.FRECUENCIAS -> {
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
                     .take(10).map { it.key }
-            }
-            MetodoCalculo.NUMEROS_CALIENTES -> {
-                val recientes = terminaciones.take(5)
-                recientes.groupingBy { it }.eachCount()
-                    .entries.sortedByDescending { it.value }
-                    .map { it.key }.take(10)
             }
             MetodoCalculo.NUMEROS_FRIOS -> {
                 val ultimaAparicion = mutableMapOf<Int, Int>()
@@ -2124,33 +1664,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     .sortedBy { ultimaAparicion[it] ?: 0 }
                     .take(10)
             }
-            MetodoCalculo.EQUILIBRIO_ESTADISTICO -> {
-                val frecuencias = terminaciones.groupingBy { it }.eachCount()
-                val frecuentes = frecuencias.entries.sortedByDescending { it.value }.take(5).map { it.key }
-                val nunca = (0..99).filter { it !in frecuencias.keys }.shuffled().take(5)
-                frecuentes + nunca
-            }
-            MetodoCalculo.PROBABILIDAD_CONDICIONAL -> {
-                val ultima = terminaciones.firstOrNull() ?: 50
-                listOf(
-                    (ultima + 1) % 100, (ultima - 1 + 100) % 100,
-                    (ultima + 10) % 100, (ultima - 10 + 100) % 100,
-                    (ultima + 5) % 100, (ultima - 5 + 100) % 100
-                ) + terminaciones.take(4)
-            }
-            MetodoCalculo.DESVIACION_MEDIA -> {
-                val sumaMedia = terminaciones.take(10).map { it / 10 + it % 10 }.average().toInt()
-                (0..99).filter { (it / 10 + it % 10) in (sumaMedia - 2)..(sumaMedia + 2) }
-                    .shuffled().take(10)
-            }
-            MetodoCalculo.LAPLACE -> {
-                // Decenas frecuentes
-                val decenasFrecuentes = terminaciones.map { it / 10 }.groupingBy { it }.eachCount()
-                    .entries.sortedByDescending { it.value }.take(3).map { it.key }
-                decenasFrecuentes.flatMap { dec -> (dec * 10 until dec * 10 + 10).toList() }.shuffled().take(10)
-            }
             MetodoCalculo.ALEATORIO_PURO -> {
-                (0..99).shuffled().take(10)
+                (0..99).shuffled(rnd).take(10)
             }
             MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
@@ -2159,5 +1674,32 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                     .take(10).map { it.key }
             }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // FÓRMULA DEL ABUELO: Cobertura + Anti-Popularidad + Kelly
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Ejecuta la Fórmula del Abuelo con candidatos ya seleccionados por votación.
+     * Los candidatos vienen del UseCase que ejecuta los 8 métodos y los pondera.
+     */
+    fun ejecutarFormulaAbueloConCandidatos(
+        candidatos: List<Int>,
+        tipoLoteria: TipoLoteria,
+        historico: List<ResultadoSorteo>,
+        boteActual: Double = 0.0,
+        garantiaMinima: Int = 2
+    ): ResultadoFormulaAbuelo {
+        motorIA.recargarMemoria(tipoLoteria.name)
+        inicializarSemilla(tipoLoteria.name, historico)
+
+        return com.loteria.probabilidad.domain.ml.FormulaAbuelo.ejecutar(
+            candidatos = candidatos,
+            tipoLoteria = tipoLoteria,
+            boteActual = boteActual,
+            numCandidatos = candidatos.size,
+            garantiaMinima = garantiaMinima
+        )
     }
 }

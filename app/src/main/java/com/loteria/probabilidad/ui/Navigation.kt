@@ -2,6 +2,7 @@ package com.loteria.probabilidad.ui
 
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -82,9 +83,21 @@ fun LoteriaProbabilidadApp(
                 factory = ResultadosViewModel.Factory(context)
             )
             
-            // Cargar resultados cuando se muestra la pantalla
+            // Carga inicial
             LaunchedEffect(tipoLoteria) {
                 viewModel.cargarResultados(tipoLoteria)
+            }
+
+            // Al volver de backtesting: regenerar si el caché fue invalidado por entrenamiento
+            DisposableEffect(backStackEntry) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        // recargarSiNecesario es no-op si el caché existe (carga inicial lo creó)
+                        viewModel.recargarSiNecesario()
+                    }
+                }
+                backStackEntry.lifecycle.addObserver(observer)
+                onDispose { backStackEntry.lifecycle.removeObserver(observer) }
             }
             
             val uiState by viewModel.uiState.collectAsState()
@@ -100,6 +113,10 @@ fun LoteriaProbabilidadApp(
             val historialEvaluado by viewModel.historialEvaluado.collectAsState()
             val rankingMetodos by viewModel.rankingMetodos.collectAsState()
             val prediccionesInfo by viewModel.prediccionesInfo.collectAsState()
+            // Fórmula del Abuelo
+            val formulaAbuelo by viewModel.formulaAbuelo.collectAsState()
+            val boteActual by viewModel.boteActual.collectAsState()
+            val formulaAbueloCargando by viewModel.formulaAbueloCargando.collectAsState()
 
             PantallaResultados(
                 tipoLoteria = tipoLoteria,
@@ -118,7 +135,12 @@ fun LoteriaProbabilidadApp(
                 prediccionEstrellas = prediccionEstrellas,
                 historialEvaluado = historialEvaluado,
                 rankingMetodos = rankingMetodos,
-                prediccionesInfo = prediccionesInfo
+                prediccionesInfo = prediccionesInfo,
+                formulaAbuelo = formulaAbuelo,
+                boteActual = boteActual,
+                formulaAbueloCargando = formulaAbueloCargando,
+                onBoteChange = { viewModel.actualizarBote(it) },
+                onCalcularFormula = { viewModel.ejecutarFormulaAbuelo() }
             )
         }
         

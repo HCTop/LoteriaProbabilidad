@@ -9,6 +9,7 @@ import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.data.repository.LoteriaRepository
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
+import com.loteria.probabilidad.domain.ml.LogAbuelo
 import com.loteria.probabilidad.domain.ml.MemoriaIA
 import com.loteria.probabilidad.domain.ml.MotorInteligencia
 import com.loteria.probabilidad.domain.usecase.ObtenerCombinacionesUseCase
@@ -74,6 +75,16 @@ class ResultadosViewModel(
     // Info de predicciones guardadas
     private val _prediccionesInfo = MutableStateFlow("")
     val prediccionesInfo: StateFlow<String> = _prediccionesInfo.asStateFlow()
+
+    // Fórmula del Abuelo
+    private val _formulaAbuelo = MutableStateFlow<ResultadoFormulaAbuelo?>(null)
+    val formulaAbuelo: StateFlow<ResultadoFormulaAbuelo?> = _formulaAbuelo.asStateFlow()
+
+    private val _boteActual = MutableStateFlow(0.0)
+    val boteActual: StateFlow<Double> = _boteActual.asStateFlow()
+
+    private val _formulaAbueloCargando = MutableStateFlow(false)
+    val formulaAbueloCargando: StateFlow<Boolean> = _formulaAbueloCargando.asStateFlow()
 
     private var tipoLoteriaActual: TipoLoteria? = null
 
@@ -173,6 +184,10 @@ class ResultadosViewModel(
     private fun evaluarPrediccionesPendientes(tipoLoteria: TipoLoteria) {
         if (!historialPredicciones.soportaEvaluacion(tipoLoteria.name)) return
 
+        LogAbuelo.gradiente("Evaluador", 0.0,
+            "Buscando predicciones pendientes para ${tipoLoteria.name}...")
+        var evaluacionesEncontradas = 0
+
         try {
             when (tipoLoteria) {
                 TipoLoteria.PRIMITIVA -> {
@@ -182,9 +197,9 @@ class ResultadosViewModel(
                             sorteo.numeros, listOf(sorteo.reintegro)
                         )
                         if (evaluaciones != null) {
+                            evaluacionesEncontradas++
                             actualizarAprendizajeAbuelo(tipoLoteria.name, evaluaciones)
-                            android.util.Log.d("ResultadosVM",
-                                "Evaluado ${sorteo.fecha}: mejor=${evaluaciones.maxOf { it.aciertosNumeros }} aciertos")
+                            actualizarAprendizajeGeneral(tipoLoteria.name, evaluaciones, sorteo.numeros, 6, 49, sorteo.fecha)
                         }
                     }
                 }
@@ -195,7 +210,9 @@ class ResultadosViewModel(
                             sorteo.numeros, listOf(sorteo.reintegro)
                         )
                         if (evaluaciones != null) {
+                            evaluacionesEncontradas++
                             actualizarAprendizajeAbuelo(tipoLoteria.name, evaluaciones)
+                            actualizarAprendizajeGeneral(tipoLoteria.name, evaluaciones, sorteo.numeros, 6, 49, sorteo.fecha)
                         }
                     }
                 }
@@ -206,7 +223,9 @@ class ResultadosViewModel(
                             sorteo.numeros, sorteo.estrellas
                         )
                         if (evaluaciones != null) {
+                            evaluacionesEncontradas++
                             actualizarAprendizajeAbuelo(tipoLoteria.name, evaluaciones)
+                            actualizarAprendizajeGeneral(tipoLoteria.name, evaluaciones, sorteo.numeros, 5, 50, sorteo.fecha)
                         }
                     }
                 }
@@ -217,11 +236,21 @@ class ResultadosViewModel(
                             sorteo.numeros, listOf(sorteo.numeroClave)
                         )
                         if (evaluaciones != null) {
+                            evaluacionesEncontradas++
                             actualizarAprendizajeAbuelo(tipoLoteria.name, evaluaciones)
+                            actualizarAprendizajeGeneral(tipoLoteria.name, evaluaciones, sorteo.numeros, 5, 54, sorteo.fecha)
                         }
                     }
                 }
                 else -> { /* Nacional, Navidad, Niño no se evalúan por bolas */ }
+            }
+
+            if (evaluacionesEncontradas == 0) {
+                LogAbuelo.gradiente("Evaluador", 0.0,
+                    "No hay predicciones nuevas pendientes para ${tipoLoteria.name} (ya evaluadas o sin predicciones)")
+            } else {
+                LogAbuelo.gradiente("Evaluador", 1.0,
+                    "$evaluacionesEncontradas sorteos evaluados para ${tipoLoteria.name}")
             }
         } catch (e: Exception) {
             android.util.Log.e("ResultadosVM", "Error evaluando predicciones: ${e.message}", e)
@@ -240,34 +269,105 @@ class ResultadosViewModel(
             // Buscar la evaluación del Método del Abuelo
             val evalAbuelo = evaluaciones.find { it.metodo.contains("Abuelo") } ?: return
 
-            // Calcular contribución: para cada algoritmo, ver cuántos de sus números acertaron
-            // Como no tenemos desglose por algoritmo, usamos la evaluación general como señal
             val aciertos = evalAbuelo.aciertosNumeros
             val pesosActuales = memoriaIA.obtenerPesosAbuelo(tipoLoteria)
-
-            // Si el Abuelo acertó más que la media de todos los métodos, reforzar pesos actuales
             val mediaAciertos = evaluaciones.map { it.aciertosNumeros }.average()
 
-            val contribuciones = pesosActuales.toMutableMap()
-            if (aciertos > mediaAciertos) {
-                // Reforzar: los pesos actuales funcionaron bien, mantenerlos
-                // (las contribuciones iguales a los pesos = gradiente ~0 = sin cambio grande)
-            } else if (aciertos < mediaAciertos) {
-                // Necesita ajuste: perturbar los pesos para explorar
-                // Dar más peso a los algoritmos proporcionalmente a 1/peso (los menos usados)
-                val sumInverso = pesosActuales.values.sumOf { 1.0 / it.coerceAtLeast(0.01) }
-                for (alg in memoriaIA.ALGORITMOS_ABUELO) {
-                    val pesoActual = pesosActuales[alg] ?: 0.2
-                    contribuciones[alg] = (1.0 / pesoActual.coerceAtLeast(0.01)) / sumInverso
-                }
+            // Señal directa: cuánto mejor/peor que la media
+            val signal = (aciertos.toDouble() - mediaAciertos) / maxOf(mediaAciertos, 1.0)
+            val uniforme = 1.0 / memoriaIA.ALGORITMOS_ABUELO.size
+
+            val contribuciones = mutableMapOf<String, Double>()
+            for (alg in memoriaIA.ALGORITMOS_ABUELO) {
+                val peso = pesosActuales[alg] ?: uniforme
+                // Amplificar/reducir la DESVIACIÓN del uniforme según el signal.
+                // signal > 0 → los dominantes ganan más → diferenciación
+                // signal < 0 → todos se mueven hacia uniforme → exploración
+                // Gradiente real: (peso - uniforme) * signal ≠ 0 cuando pesos difieren entre algoritmos
+                contribuciones[alg] = uniforme + (peso - uniforme) * (1.0 + signal)
             }
 
+            LogAbuelo.gradiente("Abuelo", signal,
+                "aciertos=$aciertos, media=${"%.2f".format(mediaAciertos)}")
+
             memoriaIA.actualizarPesosAbuelo(contribuciones, aciertos, tipoLoteria)
-            android.util.Log.d("ResultadosVM",
-                "Abuelo aprendizaje: aciertos=$aciertos, media=${"%.1f".format(mediaAciertos)}, " +
-                "pesos=${memoriaIA.obtenerPesosAbuelo(tipoLoteria).map { "${it.key}=${"%.3f".format(it.value)}" }}")
         } catch (e: Exception) {
             android.util.Log.e("ResultadosVM", "Error actualizando aprendizaje Abuelo: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Actualiza TODOS los sistemas de aprendizaje después de una evaluación:
+     * 1. Pesos de características (desde resultado real)
+     * 2. Pesos del ensemble (rendimiento por estrategia)
+     * 3. Números exitosos
+     * 4. Log resumen completo
+     */
+    private fun actualizarAprendizajeGeneral(
+        tipoLoteria: String,
+        evaluaciones: List<HistorialPredicciones.ResultadoEvaluacion>,
+        numerosReales: List<Int>,
+        cantidadNumeros: Int,
+        maxNumero: Int,
+        fechaSorteo: String
+    ) {
+        try {
+            // 1. Actualizar pesos de características desde resultado real
+            // Usar el mejor resultado como señal
+            val mejorAciertos = evaluaciones.maxOf { it.aciertosNumeros }
+            memoriaIA.actualizarPesosDesdeResultadoReal(mejorAciertos, cantidadNumeros, maxNumero, tipoLoteria)
+
+            // 2. Mapear evaluaciones a EstrategiaPrediccion y registrar rendimiento
+            val aciertosEstrategia = mutableMapOf<MotorInteligencia.EstrategiaPrediccion, Int>()
+            for (eval in evaluaciones) {
+                val estrategia = mapearMetodoAEstrategia(eval.metodo) ?: continue
+                aciertosEstrategia[estrategia] = eval.aciertosNumeros
+            }
+            if (aciertosEstrategia.isNotEmpty()) {
+                memoriaIA.registrarRendimientoEstrategias(aciertosEstrategia, tipoLoteria)
+            }
+
+            // 3. Registrar números exitosos con los aciertos del mejor método
+            memoriaIA.registrarNumerosExitosos(numerosReales, mejorAciertos, tipoLoteria)
+
+            // 4. Log de evaluaciones individuales
+            for (eval in evaluaciones) {
+                LogAbuelo.evaluacion(eval.metodo, eval.numerosPredichos, numerosReales, eval.aciertosNumeros)
+            }
+
+            // 5. Log resumen
+            val evalsParaResumen = evaluaciones.map { eval ->
+                Triple(eval.metodo, eval.aciertosNumeros, eval.numerosPredichos.filter { it in numerosReales })
+            }
+            LogAbuelo.resumen(
+                tipoLoteria = tipoLoteria,
+                fechaSorteo = fechaSorteo,
+                numerosReales = numerosReales,
+                evaluaciones = evalsParaResumen,
+                pesosAbuelo = memoriaIA.obtenerPesosAbuelo(tipoLoteria),
+                pesosCaracteristicas = memoriaIA.obtenerPesosCaracteristicas(tipoLoteria),
+                entrenamientos = memoriaIA.obtenerEntrenamientosAbuelo(tipoLoteria)
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("ResultadosVM", "Error en aprendizaje general: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Mapea el nombre del método (de la predicción) a la EstrategiaPrediccion del ensemble.
+     */
+    private fun mapearMetodoAEstrategia(metodo: String): MotorInteligencia.EstrategiaPrediccion? {
+        return when {
+            metodo.contains("Ensemble") || metodo.contains("🗳️") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
+            metodo.contains("Alta Confianza") || metodo.contains("🎯") -> MotorInteligencia.EstrategiaPrediccion.ALTA_CONFIANZA
+            metodo.contains("Rachas") || metodo.contains("🔥") -> MotorInteligencia.EstrategiaPrediccion.RACHAS_MIX
+            metodo.contains("AG") || metodo.contains("🧬") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
+            metodo.contains("IA") || metodo.contains("🤖") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
+            metodo.contains("Frecuencias") || metodo.contains("Análisis") -> MotorInteligencia.EstrategiaPrediccion.FRECUENCIA
+            metodo.contains("Fríos") -> MotorInteligencia.EstrategiaPrediccion.EQUILIBRIO
+            metodo.contains("Aleatorio") -> MotorInteligencia.EstrategiaPrediccion.TENDENCIA
+            metodo.contains("Abuelo") || metodo.contains("🔮") -> null // El Abuelo tiene su propio sistema
+            else -> null
         }
     }
 
@@ -348,12 +448,12 @@ class ResultadosViewModel(
                 val fechaGen = historialPredicciones.fechaGeneracion(tipoLoteria.name, fechaSorteo) ?: "?"
                 _prediccionesInfo.value = "Predicciones para sorteo del $fechaSorteo (generadas el $fechaGen)"
 
-                // Obtener estadísticas frescas con un método rápido (LAPLACE)
+                // Obtener estadísticas frescas con un método rápido
                 val analisisBase = obtenerCombinacionesUseCase.ejecutar(
                     tipoLoteria = tipoLoteria,
                     numCombinaciones = 1,
                     rangoFechas = rangoFechas,
-                    metodo = MetodoCalculo.LAPLACE
+                    metodo = MetodoCalculo.ALEATORIO_PURO
                 )
                 // Reemplazar las combinaciones con las guardadas
                 return analisisBase.copy(
@@ -396,22 +496,15 @@ class ResultadosViewModel(
             return
         }
         try {
-            val diasSorteoPorLoteria = mapOf(
-                "PRIMITIVA" to listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.SATURDAY),
-                "BONOLOTO" to listOf(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.WEDNESDAY, java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.FRIDAY, java.time.DayOfWeek.SATURDAY),
-                "EUROMILLONES" to listOf(java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.FRIDAY),
-                "GORDO_PRIMITIVA" to listOf(java.time.DayOfWeek.SUNDAY),
-                "LOTERIA_NACIONAL" to listOf(java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.SATURDAY)
-            )
-            val hoy = java.time.LocalDate.now()
-            val diasSorteo = diasSorteoPorLoteria[tipoLoteria]
             val diasSemana = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
-            val proximoSorteo = if (diasSorteo != null) {
-                (0L..7L).map { hoy.plusDays(it) }.first { it.dayOfWeek in diasSorteo }
-            } else hoy
+            val proximoSorteo = historialPredicciones.proximoSorteo(tipoLoteria)
             _diaSemanaActual.value = diasSemana[proximoSorteo.dayOfWeek.value - 1]
+            val topCount = when (tipoLoteria) {
+                "EUROMILLONES", "GORDO_PRIMITIVA" -> 5
+                else -> 6
+            }
             _mejoresNumerosHoy.value = motorIA.obtenerMejoresNumerosParaDia(
-                historico, maxNumero, proximoSorteo.dayOfWeek.value, 8
+                historico, maxNumero, proximoSorteo.dayOfWeek.value, topCount
             )
         } catch (e: Exception) {
             _mejoresNumerosHoy.value = emptyList()
@@ -421,16 +514,8 @@ class ResultadosViewModel(
     private fun cargarMejoresDigitosParaNacional(historico: List<ResultadoNacional>, tipoLoteria: String) {
         if (historico.isEmpty()) { _mejoresNumerosHoy.value = emptyList(); return }
         try {
-            val diasSorteoPorLoteria = mapOf(
-                "LOTERIA_NACIONAL" to listOf(java.time.DayOfWeek.THURSDAY, java.time.DayOfWeek.SATURDAY),
-                "NINO" to listOf(java.time.DayOfWeek.MONDAY)
-            )
-            val hoy = java.time.LocalDate.now()
-            val diasSorteo = diasSorteoPorLoteria[tipoLoteria]
             val diasSemana = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
-            val proximoSorteo = if (diasSorteo != null && diasSorteo.isNotEmpty()) {
-                (0L..7L).map { hoy.plusDays(it) }.first { it.dayOfWeek in diasSorteo }
-            } else hoy
+            val proximoSorteo = historialPredicciones.proximoSorteo(tipoLoteria)
             _diaSemanaActual.value = diasSemana[proximoSorteo.dayOfWeek.value - 1]
             val frecuenciaPorPosicion = Array(5) { mutableMapOf<Int, Int>() }
             historico.forEach { sorteo ->
@@ -514,6 +599,33 @@ class ResultadosViewModel(
         }
     }
 
+    // ==================== FÓRMULA DEL ABUELO ====================
+
+    fun actualizarBote(bote: Double) {
+        _boteActual.value = bote
+    }
+
+    fun ejecutarFormulaAbuelo() {
+        val tipo = tipoLoteriaActual ?: return
+        _formulaAbueloCargando.value = true
+        viewModelScope.launch {
+            try {
+                val resultado = withContext(Dispatchers.IO) {
+                    obtenerCombinacionesUseCase.ejecutarFormulaAbuelo(
+                        tipoLoteria = tipo,
+                        rangoFechas = _rangoFechasSeleccionado.value.rango,
+                        boteActual = _boteActual.value
+                    )
+                }
+                _formulaAbuelo.value = resultado
+            } catch (e: Exception) {
+                android.util.Log.e("ResultadosVM", "Error en Fórmula del Abuelo: ${e.message}", e)
+            } finally {
+                _formulaAbueloCargando.value = false
+            }
+        }
+    }
+
     // ==================== ACCIONES DEL USUARIO ====================
 
     fun analizarRareza(combinacion: List<Int>, maxNumero: Int): MotorInteligencia.AnalisisRareza {
@@ -555,9 +667,34 @@ class ResultadosViewModel(
                         obtenerOGenerarPredicciones(tipo, _rangoFechasSeleccionado.value.rango)
                     }
                     _uiState.value = ResultadosUiState.Success(analisis)
+                    // Actualizar complementarios y estadísticas
+                    withContext(Dispatchers.IO) {
+                        cargarPrediccionComplementario(tipo)
+                        cargarEstadisticasPredicciones(tipo.name)
+                        _historialEvaluado.value = historialPredicciones.cargarHistorial(tipo.name)
+                        _rankingMetodos.value = historialPredicciones.obtenerRankingMetodos(tipo.name)
+                    }
                 } catch (e: Exception) {
                     _uiState.value = ResultadosUiState.Error("Error: ${e.message}")
                 }
+            }
+        }
+    }
+
+    /**
+     * Recarga ligera: solo regenera predicciones si el caché fue invalidado (ej. tras entrenamiento).
+     * No recarga el histórico completo.
+     */
+    fun recargarSiNecesario() {
+        tipoLoteriaActual?.let { tipo ->
+            val proximoSorteo = historialPredicciones.proximoSorteo(tipo.name)
+            val fechaSorteo = proximoSorteo.toString()
+            val tieneCache = historialPredicciones.tienePrediccionesGuardadas(tipo.name, fechaSorteo)
+
+            if (!tieneCache) {
+                // El caché fue invalidado (por entrenamiento) → regenerar
+                android.util.Log.d("ResultadosVM", "Caché invalidado, regenerando predicciones")
+                regenerarResultados()
             }
         }
     }

@@ -16,11 +16,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.loteria.probabilidad.data.model.AnalisisProbabilidad
-import com.loteria.probabilidad.data.model.OpcionRangoFechas
-import com.loteria.probabilidad.data.model.TipoLoteria
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
+import com.loteria.probabilidad.data.model.*
+import com.loteria.probabilidad.domain.ml.GestionBankroll
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
 import com.loteria.probabilidad.domain.ml.MotorInteligencia.PrediccionComplementarioDia
 import com.loteria.probabilidad.ui.components.*
@@ -67,6 +74,12 @@ fun PantallaResultados(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
+    // Fórmula del Abuelo
+    formulaAbuelo: ResultadoFormulaAbuelo? = null,
+    boteActual: Double = 0.0,
+    formulaAbueloCargando: Boolean = false,
+    onBoteChange: (Double) -> Unit = {},
+    onCalcularFormula: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var mostrarSelectorFechas by remember { mutableStateOf(false) }
@@ -160,7 +173,12 @@ fun PantallaResultados(
                         prediccionEstrellas = prediccionEstrellas,
                         historialEvaluado = historialEvaluado,
                         rankingMetodos = rankingMetodos,
-                        prediccionesInfo = prediccionesInfo
+                        prediccionesInfo = prediccionesInfo,
+                        formulaAbuelo = formulaAbuelo,
+                        boteActual = boteActual,
+                        formulaAbueloCargando = formulaAbueloCargando,
+                        onBoteChange = onBoteChange,
+                        onCalcularFormula = onCalcularFormula
                     )
                 }
             }
@@ -241,6 +259,12 @@ private fun ResultadosContent(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
+    // Fórmula del Abuelo
+    formulaAbuelo: ResultadoFormulaAbuelo? = null,
+    boteActual: Double = 0.0,
+    formulaAbueloCargando: Boolean = false,
+    onBoteChange: (Double) -> Unit = {},
+    onCalcularFormula: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -352,6 +376,18 @@ private fun ResultadosContent(
                     tipoLoteria = tipoLoteria
                 )
             }
+        }
+
+        // Fórmula del Abuelo
+        item {
+            FormulaAbueloCard(
+                tipoLoteria = tipoLoteria,
+                formulaAbuelo = formulaAbuelo,
+                boteActual = boteActual,
+                cargando = formulaAbueloCargando,
+                onBoteChange = onBoteChange,
+                onCalcular = onCalcularFormula
+            )
         }
 
         // Probabilidad teórica (Laplace)
@@ -866,6 +902,423 @@ private fun EvaluacionCard(
                 }
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FÓRMULA DEL ABUELO - Card expandible
+// ═══════════════════════════════════════════════════════════════════
+
+@Composable
+private fun FormulaAbueloCard(
+    tipoLoteria: TipoLoteria,
+    formulaAbuelo: ResultadoFormulaAbuelo?,
+    boteActual: Double,
+    cargando: Boolean,
+    onBoteChange: (Double) -> Unit,
+    onCalcular: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expandido by remember { mutableStateOf(false) }
+    var boteTexto by remember { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
+
+    // Calcular Kelly rápido para el semáforo (sin necesidad de calcular cobertura)
+    val kellyRapido = remember(tipoLoteria, boteActual) {
+        GestionBankroll.calcularKelly(tipoLoteria, boteActual)
+    }
+
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // Cabecera clickable
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expandido = !expandido },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "La Formula del Abuelo",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Cobertura + Anti-popularidad + Kelly",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // Semáforo Kelly mini
+                SemaforoKellyMini(kellyRapido)
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expandido) "Contraer" else "Expandir"
+                )
+            }
+
+            // Contenido expandible
+            AnimatedVisibility(visible = expandido) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    // Input bote
+                    OutlinedTextField(
+                        value = boteTexto,
+                        onValueChange = { nuevo ->
+                            boteTexto = nuevo.filter { it.isDigit() }
+                            boteTexto.toLongOrNull()?.let { onBoteChange(it.toDouble()) }
+                        },
+                        label = { Text("Bote actual (euros)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Semáforo Kelly completo
+                    SemaforoKellyCompleto(kellyRapido)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Botón calcular
+                    Button(
+                        onClick = onCalcular,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !cargando
+                    ) {
+                        if (cargando) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Calculando...")
+                        } else {
+                            Text("Calcular Formula del Abuelo")
+                        }
+                    }
+
+                    // Resultados
+                    if (formulaAbuelo != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        FormulaAbueloResultados(formulaAbuelo, tipoLoteria)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SemaforoKellyMini(kelly: AnalisisKelly) {
+    val color = Color(kelly.recomendacion.color)
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(color),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "${kelly.atractividad}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun SemaforoKellyCompleto(kelly: AnalisisKelly) {
+    val color = Color(kelly.recomendacion.color)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.12f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(color),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "${kelly.atractividad}/10",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Column {
+                    Text(
+                        text = kelly.recomendacion.displayName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = color
+                    )
+                    Text(
+                        text = "EV: ${"%.4f".format(kelly.valorEsperado)} euros/boleto",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (kelly.boteActual > 0) {
+                Text(
+                    text = "Bote: ${"%.0f".format(kelly.boteActual)} euros",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormulaAbueloResultados(
+    resultado: ResultadoFormulaAbuelo,
+    tipoLoteria: TipoLoteria
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Cobertura (loterías de combinación)
+        resultado.cobertura?.let { cobertura ->
+            Text(
+                text = "Cobertura: ${cobertura.candidatos.size} candidatos -> ${resultado.ticketsFiltrados.size} boletos",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = cobertura.garantia,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            // Probabilidad de activación
+            if (cobertura.probActivacion > 0) {
+                val probColor = when {
+                    cobertura.probActivacion >= 0.7 -> Color(0xFF388E3C)
+                    cobertura.probActivacion >= 0.5 -> Color(0xFF7CB342)
+                    cobertura.probActivacion >= 0.3 -> Color(0xFFFBC02D)
+                    else -> Color(0xFFF57C00)
+                }
+                Text(
+                    text = "Prob. activacion: ${"%.1f".format(cobertura.probActivacion * 100)}% | Cobertura parejas: ${"%.1f".format(cobertura.coberturaPct)}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = probColor,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Candidatos del análisis
+            Text(
+                text = "Candidatos: ${cobertura.candidatos.joinToString(", ")}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Grid de tickets - usar los FILTRADOS (pueden estar mutados por anti-popularidad)
+            resultado.ticketsFiltrados.forEachIndexed { index, score ->
+                TicketCoberturaRow(
+                    index = index + 1,
+                    ticket = score.combinacion,
+                    candidatos = cobertura.candidatos,
+                    score = score,
+                    tipoLoteria = tipoLoteria
+                )
+            }
+
+            // Suplemento histórico (reintegro, estrellas, clave) con % de probabilidad
+            if (resultado.suplementoCandidatos.isNotEmpty()) {
+                val (etiqueta, tipoBola) = when (tipoLoteria) {
+                    TipoLoteria.EUROMILLONES -> "Estrellas sugeridas" to TipoBola.ESTRELLA
+                    TipoLoteria.GORDO_PRIMITIVA -> "Clave sugerida" to TipoBola.COMPLEMENTARIO
+                    else -> "Reintegro sugerido" to TipoBola.REINTEGRO
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = etiqueta,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    resultado.suplementoCandidatos.forEachIndexed { idx, num ->
+                        val pct = resultado.suplementoPorcentajes.getOrNull(idx)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            BolaNumerica(numero = num, tipo = tipoBola)
+                            if (pct != null) {
+                                Text(
+                                    text = "${"%.1f".format(pct)}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cobertura dígitos (Nacional/Navidad/Niño)
+        resultado.coberturaDigitos?.let { cobDigitos ->
+            Text(
+                text = "Cobertura de terminaciones",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = cobDigitos.explicacion,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            cobDigitos.numeros.forEachIndexed { index, num ->
+                val score = resultado.ticketsFiltrados.getOrNull(index)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${index + 1}. $num",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (score != null) {
+                        ScoreUnicidadBadge(score.scoreUnicidad)
+                    }
+                }
+            }
+        }
+
+        // Kelly desglose
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+            )
+        ) {
+            Text(
+                text = resultado.analisisKelly.explicacion,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(12.dp),
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        // Resumen
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+            )
+        ) {
+            Text(
+                text = resultado.resumen,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(12.dp),
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun TicketCoberturaRow(
+    index: Int,
+    ticket: List<Int>,
+    @Suppress("UNUSED_PARAMETER") candidatos: List<Int>,
+    score: ScorePopularidad?,
+    @Suppress("UNUSED_PARAMETER") tipoLoteria: TipoLoteria
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Boleto $index",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (score != null) {
+                ScoreUnicidadBadge(score.scoreUnicidad)
+            }
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ticket.forEach { numero ->
+                BolaNumerica(numero = numero, tipo = TipoBola.PRINCIPAL)
+            }
+        }
+        // Info de unicidad: penalizaciones o mensaje positivo
+        if (score != null) {
+            val texto = if (score.penalizaciones.isNotEmpty()) {
+                score.penalizaciones.joinToString(" | ")
+            } else {
+                score.estimacionJugadores
+            }
+            val color = if (score.penalizaciones.isNotEmpty()) {
+                MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+            } else {
+                Color(0xFF388E3C).copy(alpha = 0.8f)
+            }
+            Text(
+                text = texto,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScoreUnicidadBadge(score: Int) {
+    val color = when {
+        score >= 80 -> Color(0xFF388E3C)
+        score >= 60 -> Color(0xFF7CB342)
+        score >= 40 -> Color(0xFFFBC02D)
+        score >= 20 -> Color(0xFFF57C00)
+        else -> Color(0xFFD32F2F)
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = "$score/100",
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 

@@ -69,8 +69,6 @@ fun PantallaBacktest(
     var diasAtras by remember { mutableStateOf(valorInicial) }
     var iteraciones by remember { mutableStateOf(50f) }
     var resumenIA by remember { mutableStateOf(memoriaIA.obtenerResumenIA(tipoLoteria.name)) }
-    var tamanoPool by remember { mutableStateOf(memoriaIA.obtenerTamanoPool().toFloat()) }
-    
     // Estado del servicio
     var servicioActivo by remember { mutableStateOf(AprendizajeService.isRunning) }
     var servicioParaEsta by remember { mutableStateOf(AprendizajeService.isRunningFor(tipoLoteria.name)) }
@@ -122,6 +120,8 @@ fun PantallaBacktest(
                     entrenamientoRapidoProgreso = -2
                     entrenamientoRapidoResultado = AprendizajeService.ultimoLog
                     resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name)
+                    // Refrescar resultados de backtest persistidos
+                    resultados = persistencia.obtenerResultados(tipoLoteria.name)
                     // Drenar logs finales
                     val logsPendientes = AprendizajeService.obtenerLogsRapido()
                     logsPendientes.forEach { addLog(it) }
@@ -434,61 +434,6 @@ fun PantallaBacktest(
                                 }
                             }
                         }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Divider(color = Color.Gray.copy(alpha = 0.3f))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        // Configuración del tamaño del pool
-                        Text("🎯 Selectividad del pool", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(
-                            "De los 49 números, primero se eligen los N mejores candidatos de cada categoría (frecuentes, retrasados, tendencia, etc). Con menos números se es más preciso pero menos variado.",
-                            fontSize = 10.sp,
-                            color = Color.Gray
-                        )
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Pool: ${tamanoPool.toInt()} números", fontSize = 12.sp)
-                            Text(
-                                when {
-                                    tamanoPool <= 8 -> "Muy selectivo"
-                                    tamanoPool <= 12 -> "Selectivo"
-                                    tamanoPool <= 16 -> "Equilibrado"
-                                    else -> "Amplio"
-                                },
-                                fontSize = 10.sp,
-                                color = when {
-                                    tamanoPool <= 8 -> Color(0xFFFF9800)
-                                    tamanoPool <= 12 -> Color(0xFF4CAF50)
-                                    tamanoPool <= 16 -> Color(0xFF2196F3)
-                                    else -> Color.Gray
-                                }
-                            )
-                        }
-                        
-                        Slider(
-                            value = tamanoPool,
-                            onValueChange = { tamanoPool = it },
-                            onValueChangeFinished = { 
-                                memoriaIA.guardarTamanoPool(tamanoPool.toInt())
-                                addLog("⚙️ Pool cambiado a ${tamanoPool.toInt()} números")
-                            },
-                            valueRange = 5f..20f,
-                            steps = 14,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        
-                        Text(
-                            "• 5-8: Solo los mejores números de cada categoría\n" +
-                            "• 10-12: Balance recomendado\n" +
-                            "• 15-20: Más variedad, menos selectivo",
-                            fontSize = 9.sp,
-                            color = Color.Gray
-                        )
                         
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(onClick = { memoriaIA.reiniciarMemoria(tipoLoteria.name); resumenIA = memoriaIA.obtenerResumenIA(tipoLoteria.name); addLog("🗑️ Memoria reseteada") }, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error), modifier = Modifier.fillMaxWidth()) {

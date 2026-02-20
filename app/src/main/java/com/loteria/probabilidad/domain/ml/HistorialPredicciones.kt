@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
 
 /**
  * Sistema de persistencia de predicciones.
@@ -55,7 +56,11 @@ class HistorialPredicciones(context: Context) {
         val hoy = LocalDate.now()
         val diasSorteo = DIAS_SORTEO[tipoLoteria]
         if (diasSorteo.isNullOrEmpty()) return hoy
-        return (0L..7L).map { hoy.plusDays(it) }
+        // Si hoy es día de sorteo pero ya pasaron las 22:00, el sorteo ya ocurrió
+        val horaLimite = LocalTime.of(22, 0)
+        val sorteoHoyYaPaso = hoy.dayOfWeek in diasSorteo && LocalTime.now() >= horaLimite
+        val inicio = if (sorteoHoyYaPaso) 1L else 0L
+        return (inicio..7L).map { hoy.plusDays(it) }
             .first { it.dayOfWeek in diasSorteo }
     }
 
