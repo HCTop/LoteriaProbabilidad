@@ -284,14 +284,14 @@ class ObtenerCombinacionesUseCase(
      *
      * Tres criterios estadísticos combinados:
      *
-     * 1. FRECUENCIA (40%): Diferencia entre frecuencia observada y esperada.
+     * 1. FRECUENCIA (20%): Diferencia entre frecuencia observada y esperada.
      *    Chi-cuadrado simplificado: (observada - esperada)² / esperada
      *    Si observada > esperada → score positivo (sale más de lo normal)
      *
-     * 2. CALIENTES (35%): Frecuencia en los últimos 20-30 sorteos vs la general.
+     * 2. CALIENTES (60%): Frecuencia en los últimos 15 sorteos vs la general.
      *    Si un número sale más en los últimos sorteos que en el total → está caliente.
      *
-     * 3. DEBIDOS (25%): Sorteos desde la última aparición vs promedio de gap.
+     * 3. DEBIDOS (20%): Sorteos desde la última aparición vs promedio de gap.
      *    Si lleva más sorteos sin salir que su promedio → está "debido".
      *
      * Los scores se normalizan 0-1 y se combinan con los pesos indicados.
