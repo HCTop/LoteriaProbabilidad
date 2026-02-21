@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.loteria.probabilidad.data.datasource.ActualizadorHistorico
+import com.loteria.probabilidad.service.AprendizajeContinuo
 import com.loteria.probabilidad.service.AprendizajeService
 import com.loteria.probabilidad.ui.LoteriaProbabilidadApp
 import com.loteria.probabilidad.ui.screens.PantallaLogin
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
     
     // Estado de autenticación
     private var estaAutenticado by mutableStateOf(false)
+
+    // Aprendizaje continuo mientras el app está visible
+    private val aprendizajeContinuo = AprendizajeContinuo(this)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +73,7 @@ class MainActivity : ComponentActivity() {
                             onLoginExitoso = {
                                 estaAutenticado = true
                                 actualizarHistoricosEnBackground()
+                                aprendizajeContinuo.iniciar(lifecycleScope)
                             }
                         )
                     }
@@ -77,6 +82,20 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    override fun onStart() {
+        super.onStart()
+        // Iniciar aprendizaje continuo cuando el app es visible
+        if (estaAutenticado) {
+            aprendizajeContinuo.iniciar(lifecycleScope)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Detener cuando el app pasa a segundo plano
+        aprendizajeContinuo.detener()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
