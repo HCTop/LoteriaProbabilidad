@@ -234,8 +234,8 @@ class ObtenerCombinacionesUseCase(
     }
 
     /**
-     * Calcula los números suplementarios más frecuentes del histórico con su % de aparición:
-     * - Primitiva/Bonoloto: top 3 reintegros (0-9)
+     * Calcula los números suplementarios con su % de aparición en el histórico:
+     * - Primitiva/Bonoloto: los 10 reintegros (0-9) ciclando — estrategia C óptima por simulación
      * - Euromillones: top 4 estrellas individuales (1-12)
      * - Gordo: top 3 claves (0-9)
      * Devuelve (numeros, porcentajes) — 100% determinista, igual en todos los dispositivos.
@@ -251,9 +251,11 @@ class ObtenerCombinacionesUseCase(
                 val total = hist.size.takeIf { it > 0 } ?: 1
                 val freq = IntArray(10)
                 hist.forEach { s -> if (s.reintegro in 0..9) freq[s.reintegro]++ }
-                val top = (0..9).sortedByDescending { freq[it] }.take(3)
-                val pct = top.map { (freq[it].toDouble() / total) * 100 }
-                Pair(top, pct)
+                // Estrategia C: cubrir los 10 reintegros ciclando (0-9)
+                // Simular demostró que es óptimo vs top-3 o top-5
+                val todos = (0..9).toList()
+                val pct = todos.map { (freq[it].toDouble() / total) * 100 }
+                Pair(todos, pct)
             }
             TipoLoteria.EUROMILLONES -> {
                 @Suppress("UNCHECKED_CAST")

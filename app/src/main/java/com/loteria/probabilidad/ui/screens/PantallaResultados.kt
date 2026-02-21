@@ -1161,7 +1161,7 @@ private fun FormulaAbueloResultados(
                 val etiqueta = when (tipoLoteria) {
                     TipoLoteria.EUROMILLONES -> "Estrellas distribuidas por boleto"
                     TipoLoteria.GORDO_PRIMITIVA -> "Clave distribuida por boleto"
-                    else -> "Reintegro distribuido por boleto (necesario para el bote)"
+                    else -> "Reintegro ciclado 0-9 por boleto (cubre todos para maximizar probabilidad)"
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
