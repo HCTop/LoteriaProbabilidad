@@ -1689,7 +1689,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         tipoLoteria: TipoLoteria,
         historico: List<ResultadoSorteo>,
         boteActual: Double = 0.0,
-        garantiaMinima: Int = 2
+        garantiaMinima: Int = 3
     ): ResultadoFormulaAbuelo {
         motorIA.recargarMemoria(tipoLoteria.name)
         inicializarSemilla(tipoLoteria.name, historico)
