@@ -210,7 +210,7 @@ class ObtenerCombinacionesUseCase(
         tipoLoteria: TipoLoteria,
         rangoFechas: RangoFechas = RangoFechas.TODO,
         boteActual: Double = 0.0,
-        numCandidatos: Int = 15,
+        numCandidatos: Int = 17,
         garantiaMinima: Int = 3
     ): ResultadoFormulaAbuelo {
         val historicoCompleto = repository.obtenerHistorico(tipoLoteria)
@@ -284,14 +284,14 @@ class ObtenerCombinacionesUseCase(
      *
      * Tres criterios estadísticos combinados:
      *
-     * 1. FRECUENCIA (20%): Diferencia entre frecuencia observada y esperada.
+     * 1. FRECUENCIA (15%): Diferencia entre frecuencia observada y esperada.
      *    Chi-cuadrado simplificado: (observada - esperada)² / esperada
      *    Si observada > esperada → score positivo (sale más de lo normal)
      *
-     * 2. CALIENTES (60%): Frecuencia en los últimos 15 sorteos vs la general.
+     * 2. CALIENTES (70%): Frecuencia en los últimos 12 sorteos vs la general.
      *    Si un número sale más en los últimos sorteos que en el total → está caliente.
      *
-     * 3. DEBIDOS (20%): Sorteos desde la última aparición vs promedio de gap.
+     * 3. DEBIDOS (15%): Sorteos desde la última aparición vs promedio de gap.
      *    Si lleva más sorteos sin salir que su promedio → está "debido".
      *
      * Los scores se normalizan 0-1 y se combinan con los pesos indicados.
@@ -334,7 +334,7 @@ class ObtenerCombinacionesUseCase(
         }
 
         // ═══ CRITERIO 2: CALIENTES (últimos N sorteos) ═══
-        val ventanaCaliente = minOf(15, totalSorteos / 3).coerceAtLeast(10)
+        val ventanaCaliente = minOf(12, totalSorteos / 3).coerceAtLeast(8)
         val sorteosRecientes = sorteos.takeLast(ventanaCaliente)
         val frecReciente = IntArray(maxNum + 1)
         for (sorteo in sorteosRecientes) {
@@ -384,12 +384,12 @@ class ObtenerCombinacionesUseCase(
         val normCaliente = normalizar(scoreCaliente, maxNum)
         val normDebido = normalizar(scoreDebido, maxNum)
 
-        // Ponderación: Frecuencia 20%, Calientes 60%, Debidos 20%
+        // Ponderación: Frecuencia 15%, Calientes 70%, Debidos 15%
         val scoreFinal = DoubleArray(maxNum + 1)
         for (num in 1..maxNum) {
-            scoreFinal[num] = 0.20 * normFrecuencia[num] +
-                    0.60 * normCaliente[num] +
-                    0.20 * normDebido[num]
+            scoreFinal[num] = 0.15 * normFrecuencia[num] +
+                    0.70 * normCaliente[num] +
+                    0.15 * normDebido[num]
         }
 
         // Seleccionar top V, asegurando equilibrio alto/bajo

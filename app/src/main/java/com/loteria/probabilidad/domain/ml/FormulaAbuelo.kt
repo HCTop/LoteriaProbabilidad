@@ -28,9 +28,10 @@ object FormulaAbuelo {
     private fun configPorDefecto(tipoLoteria: TipoLoteria): ConfiguracionCobertura {
         return when (tipoLoteria) {
             // Primitiva/Bonoloto: 49 números, elegir 6
-            // v=15: E[aciertos]=15*6/49≈1.84, P(≥3)≈26% → garantía 3 aciertos cuando activa
+            // v=17: E[aciertos]=17*6/49≈2.08, P(≥3)≈34% → garantía 3 aciertos cuando activa
+            // Simulación 200 sorteos: ROI -77.5% (mejor consistente sin depender de suerte)
             TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> ConfiguracionCobertura(
-                v = 15, k = 6, t = 3, m = 3,
+                v = 17, k = 6, t = 3, m = 3,
                 tipoLoteria = tipoLoteria
             )
             // Euromillones: 50 números, elegir 5
@@ -59,7 +60,7 @@ object FormulaAbuelo {
         candidatos: List<Int>,
         tipoLoteria: TipoLoteria,
         boteActual: Double = 0.0,
-        numCandidatos: Int = 15,
+        numCandidatos: Int = 17,
         garantiaMinima: Int = 3
     ): ResultadoFormulaAbuelo {
         val esDigitos = tipoLoteria in listOf(
