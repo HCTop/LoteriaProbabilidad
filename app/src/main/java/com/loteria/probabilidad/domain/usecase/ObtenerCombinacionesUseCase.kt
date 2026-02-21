@@ -251,9 +251,13 @@ class ObtenerCombinacionesUseCase(
                 val total = hist.size.takeIf { it > 0 } ?: 1
                 val freq = IntArray(10)
                 hist.forEach { s -> if (s.reintegro in 0..9) freq[s.reintegro]++ }
-                // Estrategia C: cubrir los 10 reintegros ciclando (0-9)
-                // Simular demostró que es óptimo vs top-3 o top-5
-                val todos = (0..9).toList()
+                // Estrategia C: cubrir los 10 reintegros ciclando
+                // Los 5 más frecuentes en posiciones pares (2 boletos c/u)
+                // Los 5 menos frecuentes en posiciones impares (1 boleto c/u)
+                val sortedByFreq = (0..9).sortedByDescending { freq[it] }
+                val top5 = sortedByFreq.take(5)
+                val bottom5 = sortedByFreq.drop(5)
+                val todos = (0..4).flatMap { i -> listOf(top5[i], bottom5[i]) }
                 val pct = todos.map { (freq[it].toDouble() / total) * 100 }
                 Pair(todos, pct)
             }
