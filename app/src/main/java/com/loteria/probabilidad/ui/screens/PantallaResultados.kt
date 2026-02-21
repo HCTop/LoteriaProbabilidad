@@ -1132,47 +1132,43 @@ private fun FormulaAbueloResultados(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Grid de tickets - usar los FILTRADOS (pueden estar mutados por anti-popularidad)
+            // Grid de tickets - con reintegro/suplemento asignado por boleto
+            val suplementos = resultado.suplementoCandidatos
+            val totalTickets = resultado.ticketsFiltrados.size
+            val tipoBolaSup = when (tipoLoteria) {
+                TipoLoteria.EUROMILLONES -> TipoBola.ESTRELLA
+                TipoLoteria.GORDO_PRIMITIVA -> TipoBola.COMPLEMENTARIO
+                else -> TipoBola.REINTEGRO
+            }
             resultado.ticketsFiltrados.forEachIndexed { index, score ->
+                // Distribuir suplementos uniformemente: 5+5+5 para 3 reintegros en 15 boletos
+                val suplemento = if (suplementos.isNotEmpty()) {
+                    suplementos[(index * suplementos.size) / totalTickets]
+                } else null
                 TicketCoberturaRow(
                     index = index + 1,
                     ticket = score.combinacion,
                     candidatos = cobertura.candidatos,
                     score = score,
-                    tipoLoteria = tipoLoteria
+                    tipoLoteria = tipoLoteria,
+                    suplemento = suplemento,
+                    tipoBolaSup = tipoBolaSup
                 )
             }
 
-            // Suplemento histórico (reintegro, estrellas, clave) con % de probabilidad
-            if (resultado.suplementoCandidatos.isNotEmpty()) {
-                val (etiqueta, tipoBola) = when (tipoLoteria) {
-                    TipoLoteria.EUROMILLONES -> "Estrellas sugeridas" to TipoBola.ESTRELLA
-                    TipoLoteria.GORDO_PRIMITIVA -> "Clave sugerida" to TipoBola.COMPLEMENTARIO
-                    else -> "Reintegro sugerido" to TipoBola.REINTEGRO
+            // Leyenda de distribución de suplementos
+            if (suplementos.isNotEmpty()) {
+                val etiqueta = when (tipoLoteria) {
+                    TipoLoteria.EUROMILLONES -> "Estrellas distribuidas por boleto"
+                    TipoLoteria.GORDO_PRIMITIVA -> "Clave distribuida por boleto"
+                    else -> "Reintegro distribuido por boleto (necesario para el bote)"
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = etiqueta,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    resultado.suplementoCandidatos.forEachIndexed { idx, num ->
-                        val pct = resultado.suplementoPorcentajes.getOrNull(idx)
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            BolaNumerica(numero = num, tipo = tipoBola)
-                            if (pct != null) {
-                                Text(
-                                    text = "${"%.1f".format(pct)}%",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
 
@@ -1249,7 +1245,9 @@ private fun TicketCoberturaRow(
     ticket: List<Int>,
     @Suppress("UNUSED_PARAMETER") candidatos: List<Int>,
     score: ScorePopularidad?,
-    @Suppress("UNUSED_PARAMETER") tipoLoteria: TipoLoteria
+    @Suppress("UNUSED_PARAMETER") tipoLoteria: TipoLoteria,
+    suplemento: Int? = null,
+    tipoBolaSup: TipoBola = TipoBola.REINTEGRO
 ) {
     Column(
         modifier = Modifier
@@ -1271,9 +1269,22 @@ private fun TicketCoberturaRow(
             }
         }
         Spacer(modifier = Modifier.height(2.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             ticket.forEach { numero ->
                 BolaNumerica(numero = numero, tipo = TipoBola.PRINCIPAL)
+            }
+            // Separador y reintegro/suplemento asignado a este boleto
+            if (suplemento != null) {
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
+                BolaNumerica(numero = suplemento, tipo = tipoBolaSup)
             }
         }
         // Info de unicidad: penalizaciones o mensaje positivo
