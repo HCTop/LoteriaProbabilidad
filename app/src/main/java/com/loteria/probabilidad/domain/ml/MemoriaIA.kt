@@ -743,26 +743,33 @@ class MemoriaIA(context: Context) {
         aciertosEstrategia: Map<MotorInteligencia.EstrategiaPrediccion, Int>,
         tipoLoteria: String
     ) {
-        // Obtener pesos actuales o inicializar con 1.0
+        // Guardar el sorteo actual en el historial ANTES de calcular promedios
+        registrarHistorialEstrategias(aciertosEstrategia, tipoLoteria)
+
+        // Ventana deslizante: promediar los últimos 20 sorteos para reducir ruido ~20x
+        // Con 3 sorteos/semana converge en ~7 semanas en vez de ~33 semanas
+        val promediosVentana = calcularPromediosVentana(tipoLoteria, ventana = 20)
+
+        // Obtener pesos actuales o inicializar desde los calibrados por backtest.
+        // CRÍTICO: no usar 1.0 uniforme — tiraría los defaults calibrados (TENDENCIA=1.6, CICLOS=0.2)
         val pesosActuales = obtenerPesosEstrategias(tipoLoteria)?.toMutableMap()
-            ?: MotorInteligencia.EstrategiaPrediccion.values().associateWith { 1.0 }.toMutableMap()
+            ?: MotorInteligencia.pesosEnsembleDefault().toMutableMap()
 
-        // Calcular el promedio de aciertos
-        val promedioAciertos = aciertosEstrategia.values.average()
+        // Usar promedios de ventana si hay suficientes datos; si no, el sorteo individual
+        val aciertosEfectivos: Map<MotorInteligencia.EstrategiaPrediccion, Double> =
+            if (promediosVentana.size == aciertosEstrategia.size) promediosVentana
+            else aciertosEstrategia.mapValues { it.value.toDouble() }
 
-        // Actualizar pesos según rendimiento (2.5x más agresivo para convergencia en ~20-40 sorteos)
-        val learningRate = 0.25
-        aciertosEstrategia.forEach { (estrategia, aciertos) ->
+        val promedioGlobal = aciertosEfectivos.values.average()
+
+        // Tasa conservadora: con ventana de 20, la señal ya es 20x más limpia
+        val learningRate = 0.10
+        aciertosEfectivos.forEach { (estrategia, media) ->
             val pesoActual = pesosActuales[estrategia] ?: 1.0
-            val pesoAntes = pesoActual
-
-            // Normalizar por cantidadNumeros real en vez de hardcoded 6
-            val cantidadNums = aciertosEstrategia.size.coerceAtLeast(1)
-            val diferencia = (aciertos - promedioAciertos) / 6.0
+            val diferencia = (media - promedioGlobal) / 6.0
             val nuevoPeso = pesoActual + (diferencia * learningRate)
-
             pesosActuales[estrategia] = nuevoPeso.coerceIn(0.3, 2.0)
-            LogAbuelo.ensemble(estrategia.name, aciertos, pesoAntes, pesosActuales[estrategia]!!)
+            LogAbuelo.ensemble(estrategia.name, media.toInt(), pesoActual, pesosActuales[estrategia]!!)
         }
 
         // Normalizar para que el promedio sea 1.0
@@ -773,11 +780,37 @@ class MemoriaIA(context: Context) {
             }
         }
 
-        // Guardar pesos actualizados
         guardarPesosEstrategias(pesosActuales, tipoLoteria)
+    }
 
-        // Registrar historial para análisis
-        registrarHistorialEstrategias(aciertosEstrategia, tipoLoteria)
+    /**
+     * Calcula el promedio de aciertos por estrategia sobre los últimos [ventana] sorteos.
+     * Devuelve mapa vacío si no hay suficientes datos.
+     */
+    private fun calcularPromediosVentana(
+        tipoLoteria: String,
+        ventana: Int
+    ): Map<MotorInteligencia.EstrategiaPrediccion, Double> {
+        val key = "historial_estrategias_$tipoLoteria"
+        val historialJson = prefs.getString(key, "[]") ?: "[]"
+
+        return try {
+            val historial = org.json.JSONArray(historialJson)
+            val n = historial.length()
+            val inicio = maxOf(0, n - ventana)
+
+            val resultado = mutableMapOf<MotorInteligencia.EstrategiaPrediccion, Double>()
+            for (estrategia in MotorInteligencia.EstrategiaPrediccion.values()) {
+                val valores = (inicio until n).mapNotNull { i ->
+                    val reg = historial.getJSONObject(i)
+                    if (reg.has(estrategia.name)) reg.getDouble(estrategia.name) else null
+                }
+                if (valores.isNotEmpty()) resultado[estrategia] = valores.average()
+            }
+            resultado
+        } catch (e: Exception) {
+            emptyMap()
+        }
     }
 
     /**

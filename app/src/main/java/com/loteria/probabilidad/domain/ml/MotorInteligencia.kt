@@ -13,6 +13,24 @@ import kotlin.random.Random
  */
 class MotorInteligencia(private val context: Context? = null) {
 
+    companion object {
+        /**
+         * Pesos calibrados por backtest para el Ensemble.
+         * Usados como defaults en MotorInteligencia y como punto de partida
+         * en MemoriaIA para no perder la calibración al primer aprendizaje real.
+         */
+        fun pesosEnsembleDefault(): Map<EstrategiaPrediccion, Double> = mapOf(
+            EstrategiaPrediccion.TENDENCIA to 1.6,
+            EstrategiaPrediccion.FRECUENCIA to 1.4,
+            EstrategiaPrediccion.GENETICO to 1.0,
+            EstrategiaPrediccion.ALTA_CONFIANZA to 1.0,
+            EstrategiaPrediccion.RACHAS_MIX to 0.9,
+            EstrategiaPrediccion.EQUILIBRIO to 0.3,
+            EstrategiaPrediccion.CICLOS to 0.2,
+            EstrategiaPrediccion.CORRELACIONES to 0.3
+        )
+    }
+
     private val memoria: MemoriaIA? = context?.let { MemoriaIA(it) }
     private var pesosCaracteristicas: MutableMap<String, Double> = mutableMapOf()
     private var config = ConfiguracionGenetica()
@@ -3838,18 +3856,7 @@ class MotorInteligencia(private val context: Context? = null) {
         // Intentar obtener pesos aprendidos de la memoria
         val pesosAprendidos = memoria?.obtenerPesosEstrategias(tipoLoteria)
 
-        return pesosAprendidos ?: mapOf(
-            // Pesos calibrados por backtest: calientes y frecuencia son señales reales
-            // Ciclos/correlaciones/equilibrio demostrados como ruido — peso mínimo
-            EstrategiaPrediccion.TENDENCIA to 1.6,            // Calientes: señal más fuerte
-            EstrategiaPrediccion.FRECUENCIA to 1.4,           // Frecuencia histórica: segunda
-            EstrategiaPrediccion.GENETICO to 1.0,
-            EstrategiaPrediccion.ALTA_CONFIANZA to 1.0,
-            EstrategiaPrediccion.RACHAS_MIX to 0.9,
-            EstrategiaPrediccion.EQUILIBRIO to 0.3,           // Ruido — peso mínimo
-            EstrategiaPrediccion.CICLOS to 0.2,               // Ruido (= debidos) — peso mínimo
-            EstrategiaPrediccion.CORRELACIONES to 0.3         // Ruido (= pares) — peso mínimo
-        )
+        return pesosAprendidos ?: pesosEnsembleDefault()
     }
 
     /**
