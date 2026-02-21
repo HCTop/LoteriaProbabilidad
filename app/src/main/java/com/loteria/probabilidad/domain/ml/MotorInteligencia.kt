@@ -2056,12 +2056,19 @@ class MotorInteligencia(private val context: Context? = null) {
         val car = extraerCaracteristicas(historico, maxNumero, tipoLoteria)
         val scoresNumeros = mutableListOf<ScoreNumero>()
 
-        // Frecuencia esperada en equilibrio perfecto
-        val frecuenciaEsperada = (historico.size * cantidadNumeros).toDouble() / maxNumero
-        val frecMax = car.frecuencias.values.maxOrNull() ?: 1
         val tendMax = car.tendencia.values.maxOrNull() ?: 1
         val emaMax = car.ema.values.maxOrNull() ?: 1.0
-        val exitosMax = car.numerosExitosos.values.maxOrNull() ?: 1.0
+
+        // Multi-ventana: top-12 calientes en 3 horizontes distintos
+        // Backtest demostró que consenso entre ventanas es señal más fiable
+        val ventanasCorta = listOf(5, 12, 30)
+        val topPorVentana = ventanasCorta.map { vc ->
+            val recientes = historico.takeLast(vc)
+            (1..maxNumero).associateWith { n -> recientes.count { n in it.numeros } }
+                .entries.sortedByDescending { it.value }.take(12).map { it.key }.toSet()
+        }
+        val consensoMV = (1..maxNumero).associateWith { n -> topPorVentana.count { n in it } }
+        val frecMax2 = car.frecuencias.values.maxOrNull() ?: 1
 
         for (num in 1..maxNumero) {
             val detalles = mutableMapOf<String, Double>()
@@ -2072,13 +2079,12 @@ class MotorInteligencia(private val context: Context? = null) {
             val gap = car.gaps[num] ?: 0
             val tendenciaReciente = car.tendencia[num] ?: 0
 
-            // SEÑAL 1: CICLO - ¿Está "debido" según su ciclo normal?
-            // Si el gap actual > ciclo promedio, está debido
-            val cicloPromedio = car.ciclos[num] ?: 8.0
-            val ratioGapCiclo = if (cicloPromedio > 0) gap / cicloPromedio else 1.0
-            val scoreCiclo = (ratioGapCiclo * 40).coerceIn(0.0, 100.0)
-            detalles["ciclo"] = scoreCiclo
-            if (ratioGapCiclo > 0.8) senalesPositivas++  // Umbral más bajo
+            // SEÑAL 1: CONSENSO MULTI-VENTANA (sustituye ciclo/deuda — ruido puro)
+            // Número caliente en múltiples horizontes temporales = señal más fiable
+            val consenso = consensoMV[num] ?: 0
+            val scoreCiclo = (consenso / 3.0 * 100)  // 0, 33, 67 o 100
+            detalles["consenso_mv"] = scoreCiclo
+            if (consenso >= 2) senalesPositivas++  // Caliente en ≥2 de 3 ventanas
 
             // SEÑAL 2: TENDENCIA RECIENTE - ¿Está activo últimamente?
             val scoreTend = ((tendenciaReciente.toDouble() / tendMax.coerceAtLeast(1)) * 100)
@@ -2101,13 +2107,18 @@ class MotorInteligencia(private val context: Context? = null) {
             detalles["companeros"] = scoreCompaneros
             if (companerosActivos >= 2) senalesPositivas++
 
-            // SEÑAL 5: EN LISTA DE PRÓXIMOS POR CICLO
-            val posicionCiclo = car.proximosPorCiclo.indexOf(num)
-            val scoreProximoCiclo = if (posicionCiclo >= 0 && posicionCiclo < 15) {
-                100.0 - (posicionCiclo * 5)
-            } else 30.0
-            detalles["proximo_ciclo"] = scoreProximoCiclo
-            if (posicionCiclo in 0..9) senalesPositivas++
+            // SEÑAL 5: ACELERACIÓN (sustituye próximos por ciclo — ruido puro)
+            // Número caliente en ventana corta (5) Y media (12) = aceleración
+            val enCorta = num in (topPorVentana.getOrNull(0) ?: emptySet())
+            val enMedia  = num in (topPorVentana.getOrNull(1) ?: emptySet())
+            val scoreProximoCiclo = when {
+                enCorta && enMedia -> 90.0   // Caliente en ambas ventanas
+                enCorta            -> 70.0   // Solo muy reciente
+                enMedia            -> 40.0   // Solo ventana media
+                else               -> 15.0
+            }
+            detalles["aceleracion"] = scoreProximoCiclo
+            if (enCorta) senalesPositivas++
 
             // SEÑAL 6: RACHA - ¿Está caliente? (fríos eliminados: backtest demostró que restan)
             val racha = car.rachas[num]
@@ -2130,14 +2141,14 @@ class MotorInteligencia(private val context: Context? = null) {
             detalles["frecuencia"] = scoreFrecuencia
             if (scoreFrecuencia > 50) senalesPositivas++
 
-            // SCORE TOTAL PONDERADO — señales con valor demostrado tienen más peso
+            // SCORE TOTAL PONDERADO — pesos calibrados por backtest multi-ventana
             val scoreTotal =
-                scoreTend * 0.35 +          // Tendencia reciente: señal más fuerte
-                scoreEMA * 0.25 +           // EMA suavizado: segunda más fuerte
-                scoreFrecuencia * 0.20 +    // Frecuencia histórica
-                scoreRacha * 0.15 +         // Racha (solo calientes suman)
-                scoreCompaneros * 0.05      // Compañeros: peso mínimo
-            // Ciclo y próximoCiclo eliminados: equivalen a "debidos" que backtest demostró son ruido
+                scoreCiclo * 0.20 +         // Consenso multi-ventana: señal más fiable
+                scoreProximoCiclo * 0.20 +  // Aceleración (corta+media)
+                scoreTend * 0.25 +          // Tendencia reciente (ventana 30)
+                scoreEMA * 0.15 +           // EMA suavizado
+                scoreFrecuencia * 0.15 +    // Frecuencia histórica
+                scoreRacha * 0.05           // Racha caliente (apoyo)
 
             val confianza = senalesPositivas.toDouble() / senalesTotales
 

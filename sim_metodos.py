@@ -147,6 +147,60 @@ def metodo_alta_confianza(hist, n=6, umbral=3):
         selec+=[ x for x in candidatos if x not in selec]
     return sorted(selec[:n])
 
+# ─── UTILIDADES ───────────────────────────────────────────────────
+
+def score_multiventana(hist, ventanas=((5,0.50),(12,0.30),(30,0.20))):
+    """Score EMA ponderado en múltiples ventanas temporales"""
+    score=defaultdict(float)
+    for vc,peso in ventanas:
+        recent=hist[-vc:] if len(hist)>=vc else hist
+        fe=len(recent)*6/49
+        frec=defaultdict(int)
+        for s in recent:
+            for x in s['numeros']: frec[x]+=1
+        for x in range(1,50):
+            score[x]+=peso*(frec[x]/max(fe,0.001))
+    return score
+
+def score_aceleracion(hist, ventana_corta=8, ventana_larga=30):
+    """Números cuya frecuencia reciente supera su media histórica"""
+    if len(hist)<ventana_larga: return {x:0.0 for x in range(1,50)}
+    frec_larga=defaultdict(int)
+    for s in hist[-ventana_larga:]:
+        for x in s['numeros']: frec_larga[x]+=1
+    frec_corta=defaultdict(int)
+    for s in hist[-ventana_corta:]:
+        for x in s['numeros']: frec_corta[x]+=1
+    # Ratio: frecuencia reciente vs esperada en ese período
+    ratio_larga=ventana_corta/ventana_larga  # proporción esperada
+    return {x:(frec_corta[x]/max(frec_larga[x]*ratio_larga,0.001)) for x in range(1,50)}
+
+def refinar_combinacion(combo, hist, n=6, maxNum=49):
+    """Post-refinamiento estructural: suma rango y paridad balanceada"""
+    if len(hist)<10: return sorted(combo)
+    # Propiedades objetivo de Primitiva
+    suma_min, suma_max = 100, 200  # rango de sumas frecuentes
+    # Calcular suma actual
+    suma=sum(combo)
+    if suma_min<=suma<=suma_max: return sorted(combo)
+    # Encontrar número marginal a intercambiar
+    frec=defaultdict(int)
+    for s in hist:
+        for x in s['numeros']: frec[x]+=1
+    combo=list(combo)
+    # Si suma alta, reemplazar el mayor por uno menor frecuente
+    if suma>suma_max:
+        peor=max(combo)
+        candidatos=[x for x in range(1,maxNum+1) if x not in combo and x<peor]
+        candidatos.sort(key=lambda x:-frec[x])
+        if candidatos: combo.remove(peor); combo.append(candidatos[0])
+    elif suma<suma_min:
+        peor=min(combo)
+        candidatos=[x for x in range(1,maxNum+1) if x not in combo and x>peor]
+        candidatos.sort(key=lambda x:-frec[x])
+        if candidatos: combo.remove(peor); combo.append(candidatos[0])
+    return sorted(combo)
+
 # ─── VERSIONES MEJORADAS ──────────────────────────────────────────
 
 def metodo_rachas_mix_v2(hist, n=6):
@@ -191,19 +245,121 @@ def metodo_alta_confianza_v2(hist, n=6):
         if len(selec)<n: selec.append(x)
     return sorted(selec)
 
+# ─── VERSIONES v3: multi-ventana + aceleración + refinamiento ─────
+
+def metodo_rachas_mix_v3(hist, n=6):
+    """Multi-ventana momentum + refinamiento estructural"""
+    if len(hist)<30: return metodo_rachas_mix_v2(hist, n)
+    mv = score_multiventana(hist)
+    ac = score_aceleracion(hist)
+    # Combinar: 70% momentum multi-ventana + 30% aceleración
+    norm_mv=max(mv.values()) or 1; norm_ac=max(ac.values()) or 1
+    score={x: 0.70*(mv[x]/norm_mv) + 0.30*(ac[x]/norm_ac) for x in range(1,50)}
+    combo=sorted(range(1,50),key=lambda x:-score[x])[:n]
+    return refinar_combinacion(combo, hist, n)
+
+def metodo_ensemble_v3(hist, n=6):
+    """Votos ponderados: multi-ventana + aceleración + frecuencia"""
+    if len(hist)<30: return metodo_ensemble_v2(hist, n)
+    votos=defaultdict(float)
+    # Voter 1: multi-ventana momentum (peso 1.6)
+    mv=score_multiventana(hist)
+    norm=max(mv.values()) or 1
+    for x in range(1,50): votos[x]+=1.6*(mv[x]/norm)
+    # Voter 2: aceleración (peso 1.2)
+    ac=score_aceleracion(hist)
+    norm=max(ac.values()) or 1
+    for x in range(1,50): votos[x]+=1.2*(ac[x]/norm)
+    # Voter 3: frecuencia histórica (peso 1.0)
+    top_f=metodo_frecuencias(hist, n=20)
+    for rank,x in enumerate(top_f): votos[x]+=1.0*(20-rank)/20
+    combo=sorted(range(1,50),key=lambda x:-votos[x])[:n]
+    return refinar_combinacion(combo, hist, n)
+
+def metodo_alta_confianza_v3(hist, n=6):
+    """Consenso multi-ventana: caliente en ≥2 de 3 ventanas"""
+    if len(hist)<30: return metodo_alta_confianza_v2(hist, n)
+    k=10
+    # Tres ventanas distintas
+    sets=[
+        set(metodo_calientes(hist, ventana=5,  n=k)),
+        set(metodo_calientes(hist, ventana=12, n=k)),
+        set(metodo_calientes(hist, ventana=30, n=k)),
+    ]
+    # Score: apariciones en ventanas + aceleración como desempate
+    ac=score_aceleracion(hist)
+    conteo={x:sum(1 for s in sets if x in s) for x in range(1,50)}
+    # Ordenar primero por consenso, luego por aceleración
+    candidatos=sorted(range(1,50),key=lambda x:(-conteo[x],-ac[x]))
+    combo=candidatos[:n]
+    return refinar_combinacion(combo, hist, n)
+
+# ─── DIAGNÓSTICO: aislar qué componente ayuda en cada método ─────
+
+def metodo_rachas_mv_sinref(hist, n=6):
+    """Multi-ventana puro SIN refinamiento estructural"""
+    if len(hist)<30: return metodo_rachas_mix_v2(hist,n)
+    mv=score_multiventana(hist)
+    ac=score_aceleracion(hist)
+    norm_mv=max(mv.values()) or 1; norm_ac=max(ac.values()) or 1
+    score={x:0.70*(mv[x]/norm_mv)+0.30*(ac[x]/norm_ac) for x in range(1,50)}
+    return sorted(sorted(range(1,50),key=lambda x:-score[x])[:n])
+
+def metodo_rachas_ventana5(hist, n=6):
+    """Solo ventana muy corta (últimos 5 sorteos), sin refinamiento"""
+    if len(hist)<10: return metodo_aleatorio(hist)
+    cal=metodo_calientes(hist, ventana=5, n=15)
+    frec=metodo_frecuencias(hist, n=15)
+    sel=[]
+    for x in cal:
+        if len(sel)<4 and x not in sel: sel.append(x)
+    for x in frec:
+        if len(sel)<6 and x not in sel: sel.append(x)
+    return sorted(sel[:n])
+
+def metodo_ensemble_mv_sinref(hist, n=6):
+    """Ensemble multi-ventana SIN refinamiento"""
+    if len(hist)<30: return metodo_ensemble_v2(hist,n)
+    votos=defaultdict(float)
+    mv=score_multiventana(hist)
+    norm=max(mv.values()) or 1
+    for x in range(1,50): votos[x]+=1.6*(mv[x]/norm)
+    ac=score_aceleracion(hist)
+    norm=max(ac.values()) or 1
+    for x in range(1,50): votos[x]+=1.2*(ac[x]/norm)
+    top_f=metodo_frecuencias(hist,n=20)
+    for rank,x in enumerate(top_f): votos[x]+=1.0*(20-rank)/20
+    return sorted(sorted(range(1,50),key=lambda x:-votos[x])[:n])
+
+def metodo_ac_mv_sinref(hist, n=6):
+    """Alta Confianza multi-ventana SIN refinamiento"""
+    if len(hist)<30: return metodo_alta_confianza_v2(hist,n)
+    k=10
+    sets=[
+        set(metodo_calientes(hist,ventana=5, n=k)),
+        set(metodo_calientes(hist,ventana=12,n=k)),
+        set(metodo_calientes(hist,ventana=30,n=k)),
+    ]
+    ac=score_aceleracion(hist)
+    conteo={x:sum(1 for s in sets if x in s) for x in range(1,50)}
+    return sorted(sorted(range(1,50),key=lambda x:(-conteo[x],-ac[x]))[:n])
+
 METODOS=[
     ('Aleatorio Puro        [BASE]',   metodo_aleatorio),
     ('Mix 15/70/15          [Abuelo]', metodo_mixto_15_70_15),
-    ('Calientes (ult.12)',             metodo_calientes),
-    ('Frecuencias',                    metodo_frecuencias),
-    ('--- ACTUALES (aprox) ---',       None),
-    ('Rachas Mix            [actual]', metodo_rachas_mix),
-    ('Ensemble Voting       [actual]', metodo_ensemble),
-    ('Alta Confianza        [actual]', metodo_alta_confianza),
-    ('--- MEJORADOS ---',              None),
+    ('--- v2 (referencia actual) ---', None),
     ('Rachas Mix            [v2]',     metodo_rachas_mix_v2),
     ('Ensemble Voting       [v2]',     metodo_ensemble_v2),
     ('Alta Confianza        [v2]',     metodo_alta_confianza_v2),
+    ('--- diagnostico: multi-ventana sin refinamiento ---', None),
+    ('Rachas Mix MV         [sinRef]', metodo_rachas_mv_sinref),
+    ('Rachas Mix ventana=5  [sinRef]', metodo_rachas_ventana5),
+    ('Ensemble MV           [sinRef]', metodo_ensemble_mv_sinref),
+    ('AltaConf MV           [sinRef]', metodo_ac_mv_sinref),
+    ('--- v3 (con refinamiento) ---',  None),
+    ('Rachas Mix            [v3]',     metodo_rachas_mix_v3),
+    ('Ensemble Voting       [v3]',     metodo_ensemble_v3),
+    ('Alta Confianza        [v3]',     metodo_alta_confianza_v3),
 ]
 
 # ─── BACKTEST ──────────────────────────────────────────────────────
