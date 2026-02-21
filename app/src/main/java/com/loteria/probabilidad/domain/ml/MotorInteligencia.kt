@@ -2109,38 +2109,35 @@ class MotorInteligencia(private val context: Context? = null) {
             detalles["proximo_ciclo"] = scoreProximoCiclo
             if (posicionCiclo in 0..9) senalesPositivas++
 
-            // SEÑAL 6: RACHA - ¿Está caliente o muy frío?
+            // SEÑAL 6: RACHA - ¿Está caliente? (fríos eliminados: backtest demostró que restan)
             val racha = car.rachas[num]
             val scoreRacha = when (racha?.tipoRacha) {
-                TipoRacha.MUY_CALIENTE -> 90.0
+                TipoRacha.MUY_CALIENTE -> 95.0
                 TipoRacha.CALIENTE -> 80.0
-                TipoRacha.MUY_FRIO -> 75.0  // Muy debido
-                TipoRacha.FRIO -> 60.0
+                TipoRacha.MUY_FRIO -> 20.0  // Penalizar fríos
+                TipoRacha.FRIO -> 30.0       // Penalizar fríos
                 else -> 50.0
             }
             detalles["racha"] = scoreRacha
-            if (racha != null && racha.tipoRacha != TipoRacha.NORMAL) {
+            if (racha?.tipoRacha == TipoRacha.CALIENTE || racha?.tipoRacha == TipoRacha.MUY_CALIENTE) {
                 senalesPositivas++
             }
 
-            // SEÑAL 7: BALANCE - ¿Aporta diversidad a la combinación?
-            val esPar = num % 2 == 0
-            val esBajo = num <= maxNumero / 2
-            val decena = num / 10
-            // Bonus si está en una decena diferente a la más frecuente
-            val decenaScore = 50.0 + (if (decena !in listOf(0, 1, 2, 3)) 20.0 else 0.0)
-            detalles["balance"] = decenaScore
-            if (decena > 2) senalesPositivas++
+            // SEÑAL 7: FRECUENCIA HISTÓRICA (sustituye balance/decena — señal con valor real)
+            val frecuenciaReal2 = car.frecuencias[num] ?: 0
+            val frecMax2 = car.frecuencias.values.maxOrNull() ?: 1
+            val scoreFrecuencia = (frecuenciaReal2.toDouble() / frecMax2 * 100)
+            detalles["frecuencia"] = scoreFrecuencia
+            if (scoreFrecuencia > 50) senalesPositivas++
 
-            // SCORE TOTAL PONDERADO (7 señales coherentes)
+            // SCORE TOTAL PONDERADO — señales con valor demostrado tienen más peso
             val scoreTotal =
-                scoreCiclo * 0.25 +         // Ciclo: muy importante
-                scoreTend * 0.20 +          // Tendencia reciente
-                scoreEMA * 0.15 +           // EMA suavizado
-                scoreCompaneros * 0.10 +    // Compañeros activos
-                scoreProximoCiclo * 0.10 +  // Próximo por ciclo
-                scoreRacha * 0.10 +         // Racha caliente/fría
-                decenaScore * 0.10          // Balance/diversidad
+                scoreTend * 0.35 +          // Tendencia reciente: señal más fuerte
+                scoreEMA * 0.25 +           // EMA suavizado: segunda más fuerte
+                scoreFrecuencia * 0.20 +    // Frecuencia histórica
+                scoreRacha * 0.15 +         // Racha (solo calientes suman)
+                scoreCompaneros * 0.05      // Compañeros: peso mínimo
+            // Ciclo y próximoCiclo eliminados: equivalen a "debidos" que backtest demostró son ruido
 
             val confianza = senalesPositivas.toDouble() / senalesTotales
 
@@ -2555,51 +2552,44 @@ class MotorInteligencia(private val context: Context? = null) {
 
         val seleccionados = mutableSetOf<Int>()
 
-        // Añadir 2-3 calientes
-        val numCalientes = minOf(3, cantidad / 2, calientes.size)
+        // Backtest demostró que los fríos restan rendimiento — eliminados
+        // Nueva estrategia: 3 calientes + 2 frecuentes históricos + 1 tendencia
+
+        // Añadir 3 calientes (números en racha positiva reciente)
+        val numCalientes = minOf(3, calientes.size)
         calientes.take(numCalientes).forEach { seleccionados.add(it) }
 
-        // Añadir 1-2 fríos
-        val numFrios = minOf(2, (cantidad - seleccionados.size) / 2, frios.size)
-        frios.take(numFrios).forEach { seleccionados.add(it) }
+        // Añadir 2 frecuentes históricos (no fríos)
+        car.frecuencias.entries
+            .sortedByDescending { it.value }
+            .filter { it.key !in seleccionados }
+            .take(2)
+            .forEach { seleccionados.add(it.key) }
 
-        // Completar con normales
-        normales.filter { it !in seleccionados }.take(cantidad - seleccionados.size)
-            .forEach { seleccionados.add(it) }
+        // Completar con tendencia reciente
+        car.tendencia.entries
+            .sortedByDescending { it.value }
+            .filter { it.key !in seleccionados }
+            .take(cantidad - seleccionados.size)
+            .forEach { seleccionados.add(it.key) }
 
-        // Si faltan, añadir cualquier número disponible con buen score
+        // Fallback si faltan
         if (seleccionados.size < cantidad) {
-            car.frecuencias.entries
-                .sortedByDescending { it.value }
-                .filter { it.key !in seleccionados }
-                .take(cantidad - seleccionados.size)
-                .forEach { seleccionados.add(it.key) }
-        }
-
-        // Validar perfil
-        val combinacionFinal = if (esPerfilValido(seleccionados.toList(), car.estadisticasPerfil, maxNum)) {
-            seleccionados.toList().sorted()
-        } else {
-            // Regenerar con más normales
-            seleccionados.clear()
-            calientes.take(2).forEach { seleccionados.add(it) }
-            frios.take(1).forEach { seleccionados.add(it) }
             normales.filter { it !in seleccionados }.take(cantidad - seleccionados.size)
                 .forEach { seleccionados.add(it) }
-
-            while (seleccionados.size < cantidad) {
-                val disponible = (1..maxNum).filter { it !in seleccionados }.firstOrNull() ?: break
-                seleccionados.add(disponible)
-            }
-            seleccionados.toList().sorted()
+        }
+        while (seleccionados.size < cantidad) {
+            val disponible = (1..maxNum).filter { it !in seleccionados }.firstOrNull() ?: break
+            seleccionados.add(disponible)
         }
 
+        val combinacionFinal = seleccionados.toList().sorted()
         val scoreRacha = calcScoreRachas(combinacionFinal, rachas)
 
         return CombinacionSugerida(
             numeros = combinacionFinal,
             probabilidadRelativa = (scoreRacha * 100).roundTo(1),
-            explicacion = "🔥❄️ Mix Rachas | Cal:$numCalientes Frí:$numFrios | Score:${String.format("%.0f", scoreRacha * 100)}%"
+            explicacion = "🔥 Mix Rachas | Cal:$numCalientes Frec:2 | Score:${String.format("%.0f", scoreRacha * 100)}%"
         )
     }
 
@@ -3838,15 +3828,16 @@ class MotorInteligencia(private val context: Context? = null) {
         val pesosAprendidos = memoria?.obtenerPesosEstrategias(tipoLoteria)
 
         return pesosAprendidos ?: mapOf(
-            // Pesos por defecto (todos iguales inicialmente)
+            // Pesos calibrados por backtest: calientes y frecuencia son señales reales
+            // Ciclos/correlaciones/equilibrio demostrados como ruido — peso mínimo
+            EstrategiaPrediccion.TENDENCIA to 1.6,            // Calientes: señal más fuerte
+            EstrategiaPrediccion.FRECUENCIA to 1.4,           // Frecuencia histórica: segunda
             EstrategiaPrediccion.GENETICO to 1.0,
-            EstrategiaPrediccion.ALTA_CONFIANZA to 1.2,      // Ligeramente más peso
+            EstrategiaPrediccion.ALTA_CONFIANZA to 1.0,
             EstrategiaPrediccion.RACHAS_MIX to 0.9,
-            EstrategiaPrediccion.EQUILIBRIO to 1.1,
-            EstrategiaPrediccion.CICLOS to 1.0,
-            EstrategiaPrediccion.CORRELACIONES to 0.8,
-            EstrategiaPrediccion.FRECUENCIA to 0.9,
-            EstrategiaPrediccion.TENDENCIA to 1.0
+            EstrategiaPrediccion.EQUILIBRIO to 0.3,           // Ruido — peso mínimo
+            EstrategiaPrediccion.CICLOS to 0.2,               // Ruido (= debidos) — peso mínimo
+            EstrategiaPrediccion.CORRELACIONES to 0.3         // Ruido (= pares) — peso mínimo
         )
     }
 
