@@ -1269,20 +1269,27 @@ private fun TicketCoberturaRow(
             }
         }
         Spacer(modifier = Modifier.height(2.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             ticket.forEach { numero ->
                 BolaNumerica(numero = numero, tipo = TipoBola.PRINCIPAL)
             }
-            // Separador y reintegro/suplemento asignado a este boleto
-            if (suplemento != null) {
+        }
+        // Reintegro/suplemento en línea separada para no desbordar en portrait
+        if (suplemento != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val etiq = when (tipoBolaSup) {
+                    TipoBola.ESTRELLA -> "Estrellas:"
+                    TipoBola.COMPLEMENTARIO -> "Clave:"
+                    else -> "Reintegro:"
+                }
                 Text(
-                    text = "+",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 2.dp)
+                    text = etiq,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 BolaNumerica(numero = suplemento, tipo = tipoBolaSup)
             }
