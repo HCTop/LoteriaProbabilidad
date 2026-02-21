@@ -27,7 +27,7 @@ class MemoriaIA(context: Context) {
         // ═══════════════════════════════════════════════════════════════════════════
         // MEJORA 5: Parámetros del Optimizador Adam
         // ═══════════════════════════════════════════════════════════════════════════
-        private const val ADAM_LEARNING_RATE = 0.01   // α - Learning rate (más bajo que SGD)
+        private const val ADAM_LEARNING_RATE = 0.005  // α reducido: señal de características es ruido (~2% max)
         private const val ADAM_LEARNING_RATE_ABUELO = 0.03 // α para Abuelo (más agresivo)
         private const val ADAM_BETA1 = 0.9            // β₁ - Decay rate para momentum
         private const val ADAM_BETA2 = 0.999          // β₂ - Decay rate para velocity
@@ -53,6 +53,26 @@ class MemoriaIA(context: Context) {
             "suma",
             "paridad",
             "decenas"
+        )
+
+        /**
+         * Pesos calibrados por backtest sobre 300 sorteos históricos.
+         * Backtest midió la posición media de ganadores para cada señal:
+         *   tendencia +2.0%, frecuencia +0.6%, gap -2.0% (contraproducente)
+         *   ciclos/balance/paridad: ruido (confirmado por backtest de métodos)
+         * Señales débiles → diferencias modestas respecto a uniforme (0.10).
+         */
+        fun pesosCaracteristicasDefault(): Map<String, Double> = mapOf(
+            "frecuencia"    to 0.14,  // señal real (+0.6% backtest)
+            "tendencia"     to 0.15,  // señal más fuerte (+2.0% backtest)
+            "gap"           to 0.07,  // contraproducente (-2.0% backtest) — reducido
+            "patrones"      to 0.10,  // sin datos directos — neutral
+            "balance"       to 0.09,  // ruido (método equilibrio fallaba)
+            "ciclos"        to 0.07,  // ruido (método ciclos fallaba) — reducido
+            "consecutivos"  to 0.10,  // sin datos directos — neutral
+            "suma"          to 0.10,  // sin datos directos — neutral
+            "paridad"       to 0.09,  // levemente negativo (-1.6% backtest)
+            "decenas"       to 0.09   // levemente negativo (-0.5% backtest)
         )
     }
     
@@ -205,17 +225,19 @@ class MemoriaIA(context: Context) {
         LogAbuelo.gradiente("PesosReales", signal,
             "aciertos=$aciertos, esperado=${"%.2f".format(esperado)}")
 
-        val uniforme = 1.0 / CARACTERISTICAS.size
+        val calibrado = pesosCaracteristicasDefault()
 
         for (car in CARACTERISTICAS) {
-            val pesoActual = pesosActuales[car] ?: uniforme
+            val pesoActual = pesosActuales[car] ?: (1.0 / CARACTERISTICAS.size)
+            val pesoObjetivo = calibrado[car] ?: (1.0 / CARACTERISTICAS.size)
 
-            // Si signal > 0: reforzar desviaciones del uniforme (lo que tenemos funciona)
-            // Si signal < 0: mover hacia uniforme (explorar)
+            // Bug anterior: (pesoActual - uniforme) * signal → siempre 0 cuando pesos son uniformes
+            // Fix: si va bien → acercarse a calibrado; si va mal → acercarse a uniforme (explorar)
+            val uniforme = 1.0 / CARACTERISTICAS.size
             val gradiente = if (signal > 0) {
-                (pesoActual - uniforme) * signal  // Amplificar diferencias actuales
+                (pesoObjetivo - pesoActual) * signal * 0.5  // pull hacia calibrado
             } else {
-                (uniforme - pesoActual) * kotlin.math.abs(signal) * 0.3  // Mover hacia uniforme
+                (uniforme - pesoActual) * kotlin.math.abs(signal) * 0.2  // pull hacia uniforme
             }
 
             val gradienteConL2 = gradiente - L2_REGULARIZATION * pesoActual
@@ -306,8 +328,7 @@ class MemoriaIA(context: Context) {
     }
     
     private fun inicializarPesosDefault(tipoLoteria: String): Map<String, Double> {
-        val pesoInicial = 1.0 / CARACTERISTICAS.size
-        val pesos = CARACTERISTICAS.associateWith { pesoInicial }
+        val pesos = pesosCaracteristicasDefault()
         guardarPesosCaracteristicas(pesos, tipoLoteria)
         return pesos
     }
