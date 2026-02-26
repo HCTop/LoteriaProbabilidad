@@ -1694,12 +1694,30 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         motorIA.recargarMemoria(tipoLoteria.name)
         inicializarSemilla(tipoLoteria.name, historico)
 
+        // Extraer el conjunto de combinaciones históricas para el filtro de repetidos
+        val historicoNums: Set<Set<Int>> = when (tipoLoteria) {
+            TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> {
+                @Suppress("UNCHECKED_CAST")
+                (historico as List<ResultadoPrimitiva>).map { it.numeros.toSet() }.toSet()
+            }
+            TipoLoteria.EUROMILLONES -> {
+                @Suppress("UNCHECKED_CAST")
+                (historico as List<ResultadoEuromillones>).map { it.numeros.toSet() }.toSet()
+            }
+            TipoLoteria.GORDO_PRIMITIVA -> {
+                @Suppress("UNCHECKED_CAST")
+                (historico as List<ResultadoGordoPrimitiva>).map { it.numeros.toSet() }.toSet()
+            }
+            else -> emptySet()
+        }
+
         return com.loteria.probabilidad.domain.ml.FormulaAbuelo.ejecutar(
             candidatos = candidatos,
             tipoLoteria = tipoLoteria,
             boteActual = boteActual,
             numCandidatos = candidatos.size,
-            garantiaMinima = garantiaMinima
+            garantiaMinima = garantiaMinima,
+            historicoNums = historicoNums
         )
     }
 }

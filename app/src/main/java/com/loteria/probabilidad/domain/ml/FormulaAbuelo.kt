@@ -61,7 +61,8 @@ object FormulaAbuelo {
         tipoLoteria: TipoLoteria,
         boteActual: Double = 0.0,
         numCandidatos: Int = 17,
-        garantiaMinima: Int = 3
+        garantiaMinima: Int = 3,
+        historicoNums: Set<Set<Int>> = emptySet()
     ): ResultadoFormulaAbuelo {
         val esDigitos = tipoLoteria in listOf(
             TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO
@@ -70,7 +71,7 @@ object FormulaAbuelo {
         return if (esDigitos) {
             ejecutarDigitos(candidatos, tipoLoteria, boteActual)
         } else {
-            ejecutarCombinacion(candidatos, tipoLoteria, boteActual)
+            ejecutarCombinacion(candidatos, tipoLoteria, boteActual, historicoNums)
         }
     }
 
@@ -80,7 +81,8 @@ object FormulaAbuelo {
     private fun ejecutarCombinacion(
         candidatos: List<Int>,
         tipoLoteria: TipoLoteria,
-        boteActual: Double
+        boteActual: Double,
+        historicoNums: Set<Set<Int>> = emptySet()
     ): ResultadoFormulaAbuelo {
         val config = configPorDefecto(tipoLoteria)
         val v = config.v
@@ -98,11 +100,18 @@ object FormulaAbuelo {
 
         // PILAR 2: Anti-popularidad ACTIVA
         // Filtra combinaciones populares y las reemplaza por mejores
-        val ticketsFiltrados = filtrarAntiPopularidad(
+        val ticketsAntiPop = filtrarAntiPopularidad(
             cobertura.tickets, topCandidatos, k, tipoLoteria
         )
 
-        // PILAR 3: Kelly
+        // PILAR 3: Filtro histórico — máximo 5 de 6 en común con cualquier sorteo real
+        // Estadísticamente demostrado: en 4099 sorteos de Primitiva solo 1 combinación
+        // se ha repetido exactamente. No tiene sentido generar una combinación ya salida.
+        val ticketsFiltrados = filtrarRepetidosHistorico(
+            ticketsAntiPop, historicoNums, topCandidatos, tipoLoteria
+        )
+
+        // PILAR 4 (Kelly): evaluación de atractivo del sorteo
         val kelly = GestionBankroll.calcularKelly(tipoLoteria, boteActual)
 
         // Estadísticas
@@ -138,6 +147,53 @@ object FormulaAbuelo {
             analisisKelly = kelly,
             resumen = resumen
         )
+    }
+
+    /**
+     * PILAR 3: Filtra combinaciones que ya hayan salido exactamente en el histórico.
+     * Máximo permitido: 5 de 6 en común con cualquier sorteo real.
+     * Si una combinación coincide al 100% con un sorteo histórico,
+     * muta 1 número (primero dentro de candidatos, luego fuera) hasta resolverlo.
+     * Estadística: en 4099 sorteos de Primitiva solo ocurrió 1 vez (2002 y 2009).
+     */
+    private fun filtrarRepetidosHistorico(
+        tickets: List<ScorePopularidad>,
+        historicoNums: Set<Set<Int>>,
+        candidatos: List<Int>,
+        tipoLoteria: TipoLoteria
+    ): List<ScorePopularidad> {
+        if (historicoNums.isEmpty()) return tickets
+
+        return tickets.map { score ->
+            val combinacionSet = score.combinacion.toSet()
+            if (combinacionSet !in historicoNums) return@map score
+
+            // Esta combinación ya salió exactamente — mutar 1 número
+            val maxNum = tipoLoteria.maxNumero
+            val candidatoSet = candidatos.toSet()
+            // Alternativas: primero candidatos no usados, luego resto del rango
+            val alternativas = ((candidatoSet - combinacionSet) +
+                    (1..maxNum).filter { it !in combinacionSet }).distinct()
+
+            var resultado = score
+            outer@ for (numViejo in score.combinacion) {
+                for (numNuevo in alternativas) {
+                    val mutado = score.combinacion.map { if (it == numViejo) numNuevo else it }.sorted()
+                    if (mutado.toSet() !in historicoNums) {
+                        val scoreMutado = AntiPopularidad.calcularScoreCombinacion(mutado, tipoLoteria)
+                        resultado = scoreMutado.copy(
+                            penalizaciones = scoreMutado.penalizaciones +
+                                    "🔄 $numViejo→$numNuevo: combinación ya salió en histórico"
+                        )
+                        break@outer
+                    }
+                }
+            }
+
+            android.util.Log.d("ABUELO",
+                "Filtro histórico: ${score.combinacion} ya salió en histórico → mutada a ${resultado.combinacion}")
+            resultado
+        }
     }
 
     /**
