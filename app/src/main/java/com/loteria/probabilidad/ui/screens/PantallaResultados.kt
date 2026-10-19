@@ -1487,8 +1487,8 @@ private fun VariasApuestasCard(
                     item {
                         Text("¿Cuántas apuestas vas a jugar?", style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(2, 5, 10, 15).forEach { n ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(2, 5, 10, 15, 20).forEach { n ->
                                 FilterChip(
                                     selected = numApuestas == n,
                                     onClick = { numApuestas = n; onGenerar(n) },
