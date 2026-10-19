@@ -9,6 +9,7 @@ import com.loteria.probabilidad.domain.ml.HistorialPredicciones
 import com.loteria.probabilidad.domain.ml.LogAbuelo
 import com.loteria.probabilidad.domain.ml.MemoriaIA
 import com.loteria.probabilidad.domain.ml.MotorInteligencia
+import kotlinx.coroutines.launch
 
 /**
  * Punto ÚNICO para guardar y evaluar las predicciones de cada sorteo.
@@ -39,6 +40,27 @@ class GestorPredicciones(
     companion object {
         private val candados = java.util.concurrent.ConcurrentHashMap<TipoLoteria, Any>()
         private fun candado(tipo: TipoLoteria): Any = candados.getOrPut(tipo) { Any() }
+
+        // ── Simulación de sorteos pasados (puede durar minutos) ──
+        /** Lotería, sorteos hechos, total y cuándo empezó (para calcular lo que falta). */
+        data class EstadoSimulacion(val tipo: TipoLoteria, val hechos: Int, val total: Int, val inicioMs: Long) {
+            /** Segundos que faltan aprox., o null si aún no hay base para calcularlo. */
+            fun segundosRestantes(): Long? {
+                if (hechos < 3) return null
+                val porSorteo = (System.currentTimeMillis() - inicioMs) / hechos
+                return porSorteo * (total - hechos) / 1000
+            }
+        }
+        private val _simulacion = kotlinx.coroutines.flow.MutableStateFlow<EstadoSimulacion?>(null)
+        /** Simulación en marcha (o null). La pantalla lo observa aunque se haya cerrado y vuelto a abrir. */
+        val simulacion: kotlinx.coroutines.flow.StateFlow<EstadoSimulacion?> = _simulacion
+        private val enMarcha = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val parar = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val ambitoSimulacion = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+        )
+        /** Para la simulación en curso; lo ya simulado se queda guardado. */
+        fun pararSimulacion() = parar.set(true)
 
         /** Loterías de bolas: las únicas que se guardan y evalúan automáticamente. */
         val LOTERIAS_EVALUABLES = listOf(
@@ -112,48 +134,88 @@ class GestorPredicciones(
      *
      * - Las entradas quedan marcadas como simuladas (la UI lo indica).
      * - No se toca el aprendizaje de la IA (sería entrenar dos veces con lo mismo).
-     * - Se salta los sorteos que ya tienen evaluación (real o simulada).
+     * - Se salta los sorteos que ya tienen evaluación real, o simulada con todos los métodos.
+     * - Guarda por tandas de 25 y solo bloquea la lotería mientras simula cada sorteo.
      *
      * @param progreso (hechos, total) para ir mostrando el avance
      * @return número de sorteos añadidos
      */
     fun rellenarHistorialSimulado(
         tipoLoteria: TipoLoteria,
-        cuantos: Int = 10,
+        cuantos: Int = 100,
         progreso: (Int, Int) -> Unit = { _, _ -> }
-    ): Int = synchronized(candado(tipoLoteria)) {
-        if (tipoLoteria !in LOTERIAS_EVALUABLES) return@synchronized 0
-
+    ): Int {
+        if (tipoLoteria !in LOTERIAS_EVALUABLES) return 0
         // (fecha, números, complementarios) del más antiguo al más reciente
-        val sorteos = sorteosRecientes(tipoLoteria, cuantos).reversed()
+        val sorteos = synchronized(candado(tipoLoteria)) { sorteosRecientes(tipoLoteria, cuantos) }.reversed()
+        // Qué hay ya guardado (se lee una vez): reales → no se tocan; simulados completos → se saltan
+        val existentes = historialPredicciones.cargarHistorial(tipoLoteria.name).associateBy { it.fechaSorteo }
+        val nombres = obtenerCombinacionesUseCase.nombresMetodos
+        val tanda = mutableListOf<Triple<String, List<HistorialPredicciones.ResultadoEvaluacion>, Boolean>>()
         var anadidos = 0
-        sorteos.forEachIndexed { i, (fecha, numeros, complementarios) ->
+
+        fun guardarTanda() {
+            if (tanda.isEmpty()) return
+            synchronized(candado(tipoLoteria)) {
+                historialPredicciones.guardarEvaluacionesSimuladas(tipoLoteria.name, tanda.toList())
+            }
+            anadidos += tanda.size
+            tanda.clear()
+        }
+
+        for ((i, sorteo) in sorteos.withIndex()) {
+            if (parar.get()) break
             progreso(i, sorteos.size)
-            // Reales: nunca se tocan. Simulados: se rehacen solo si les falta algún método
-            // (p. ej. uno añadido después, como 🧩 Perfil típico).
-            val existente = historialPredicciones.entradaHistorial(tipoLoteria.name, fecha)
+            val (fecha, numeros, complementarios) = sorteo
+            val existente = existentes[fecha]
             val incompleta = existente != null && existente.simulado &&
-                !existente.evaluaciones.map { it.metodo }.containsAll(obtenerCombinacionesUseCase.nombresMetodos)
-            if (existente != null && !incompleta) return@forEachIndexed
+                !existente.evaluaciones.map { it.metodo }.containsAll(nombres)
+            if (existente != null && !incompleta) continue
             try {
-                val hasta = java.time.LocalDate.parse(fecha).minusDays(1).toString()
-                val analisis = obtenerCombinacionesUseCase.ejecutarTodosMetodos(
-                    tipoLoteria = tipoLoteria,
-                    rangoFechas = RangoFechas(null, hasta) // solo el pasado de ese sorteo
-                )
-                val evaluaciones = historialPredicciones.calcularEvaluaciones(
-                    analisis.combinacionesSugeridas, numeros, complementarios
-                )
-                historialPredicciones.guardarEvaluacionSimulada(
-                    tipoLoteria.name, fecha, evaluaciones, reemplazarSimulada = incompleta
-                )
-                anadidos++
+                // El candado solo durante ESTE sorteo (~1 s): así la pantalla de inicio y la
+                // sincronización diaria no se quedan esperando a que acaben 1.000 sorteos.
+                val evaluaciones = synchronized(candado(tipoLoteria)) {
+                    val hasta = java.time.LocalDate.parse(fecha).minusDays(1).toString()
+                    val analisis = obtenerCombinacionesUseCase.ejecutarTodosMetodos(
+                        tipoLoteria = tipoLoteria,
+                        rangoFechas = RangoFechas(null, hasta) // solo el pasado de ese sorteo
+                    )
+                    historialPredicciones.calcularEvaluaciones(
+                        analisis.combinacionesSugeridas, numeros, complementarios
+                    )
+                }
+                tanda.add(Triple(fecha, evaluaciones, incompleta))
+                if (tanda.size >= 25) guardarTanda()
             } catch (e: Exception) {
                 android.util.Log.e("GestorPredicciones", "Simulación $fecha falló: ${e.message}", e)
             }
         }
+        guardarTanda()
         progreso(sorteos.size, sorteos.size)
-        anadidos
+        return anadidos
+    }
+
+    /**
+     * Lanza la simulación en segundo plano (no depende de la pantalla: si sales y vuelves,
+     * sigue y se ve por dónde va). Solo una a la vez. El estado está en [simulacion].
+     */
+    fun lanzarSimulacion(tipoLoteria: TipoLoteria, cuantos: Int) {
+        if (!enMarcha.compareAndSet(false, true)) return
+        parar.set(false)
+        val inicio = System.currentTimeMillis()
+        _simulacion.value = EstadoSimulacion(tipoLoteria, 0, cuantos, inicio)
+        ambitoSimulacion.launch {
+            try {
+                rellenarHistorialSimulado(tipoLoteria, cuantos) { hechos, total ->
+                    _simulacion.value = EstadoSimulacion(tipoLoteria, hechos, total, inicio)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("GestorPredicciones", "Simulación falló: ${e.message}", e)
+            } finally {
+                _simulacion.value = null
+                enMarcha.set(false)
+            }
+        }
     }
 
     private fun sorteosRecientes(tipo: TipoLoteria, n: Int): List<Triple<String, List<Int>, List<Int>>> =

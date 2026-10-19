@@ -28,7 +28,7 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
   (validación de cabecera `fecha,` + escritura atómica). Lo llama `SeleccionViewModel`
   ANTES de evaluar aciertos.
 - `domain/ml/HistorialPredicciones` — persistencia (SharedPreferences) de predicciones
-  y evaluaciones; historial de 120 sorteos (100 simulados + reales).
+  y evaluaciones; historial de hasta 1.100 sorteos (1.000 simulados + reales).
 - `domain/ml/MemoriaIA` — pesos aprendidos. `registrarRendimientoEstrategias` acepta
   aciertos Int o medias Double.
 - `service/AprendizajeContinuo` — mini walk-forward mientras la app está visible.
@@ -41,9 +41,12 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
   `CalculadorProbabilidad.reintegrosSegunMetodo` (fríos → el menos salido, calientes → últimos 50,
   debidos → el más atrasado…) usando solo sorteos desde `INICIO_REINTEGRO` (1991-06-20; antes el CSV
   trae 0 inventado). `ObtenerCombinacionesUseCase` ya NO lo baraja. Solo se puede elegir comprando online.
-- Historial: entradas `simulado = true` vienen del botón "Simular" (10, 50 o 100 sorteos)
+- Historial: entradas `simulado = true` vienen del botón "Simular" (100, 500 o 1.000 sorteos)
   (walk-forward, sin entrenar la IA); una evaluación real sustituye a la simulada, y un simulado
   al que le falta algún método (p. ej. uno nuevo) se rehace al volver a simular.
+  `GestorPredicciones.lanzarSimulacion` corre en un ámbito propio (sigue si se cierra la pantalla),
+  bloquea la lotería solo sorteo a sorteo, guarda por tandas de 25 y se puede parar;
+  el estado está en `GestorPredicciones.simulacion` (lo observa `ResultadosViewModel`).
 - `scripts/laboratorio_primitiva.py` — laboratorio honesto: ~22 métodos en walk-forward sobre
   todo el histórico, z-score frente al azar, Bonferroni, validación fuera de muestra y test
   chi-cuadrado de sesgo del bombo. Para probar un método nuevo, añadirlo a `METODOS` y ejecutar.

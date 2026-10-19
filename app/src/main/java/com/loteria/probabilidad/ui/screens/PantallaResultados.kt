@@ -31,6 +31,7 @@ import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.domain.ml.ApuestasRepartidas
 import com.loteria.probabilidad.domain.ml.GestionBankroll
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
+import com.loteria.probabilidad.domain.usecase.GestorPredicciones
 import com.loteria.probabilidad.domain.ml.MotorInteligencia.PrediccionComplementarioDia
 import com.loteria.probabilidad.ui.components.*
 import kotlin.math.roundToInt
@@ -76,7 +77,7 @@ fun PantallaResultados(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
-    progresoRelleno: Pair<Int, Int>? = null,
+    progresoRelleno: GestorPredicciones.EstadoSimulacion? = null,
     onRellenarHistorial: (Int) -> Unit = { _ -> },
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
@@ -273,7 +274,7 @@ private fun ResultadosContent(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
-    progresoRelleno: Pair<Int, Int>? = null,
+    progresoRelleno: GestorPredicciones.EstadoSimulacion? = null,
     onRellenarHistorial: (Int) -> Unit = { _ -> },
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
@@ -1049,7 +1050,7 @@ private fun EvaluacionCard(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
     tipoLoteria: TipoLoteria,
     prediccionesInfo: String,
-    progresoRelleno: Pair<Int, Int>?,
+    progresoRelleno: GestorPredicciones.EstadoSimulacion?,
     onRellenarHistorial: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1134,17 +1135,30 @@ private fun DatoMetodo(etiqueta: String, valor: String, color: Color? = null) {
 }
 
 @Composable
-private fun BotonSimular(progresoRelleno: Pair<Int, Int>?, onRellenarHistorial: (Int) -> Unit) {
+private fun BotonSimular(progresoRelleno: GestorPredicciones.EstadoSimulacion?, onRellenarHistorial: (Int) -> Unit) {
     if (progresoRelleno != null) {
-        val (hechos, total) = progresoRelleno
+        val hechos = progresoRelleno.hechos
+        val total = progresoRelleno.total
+        val faltan = progresoRelleno.segundosRestantes()
         Text(
-            "Simulando sorteos pasados… $hechos/$total" + if (total > 10) " (tarda unos minutos)" else "",
+            "Simulando sorteos pasados… $hechos/$total" + when {
+                faltan == null -> ""
+                faltan < 60 -> " · menos de 1 min"
+                else -> " · quedan unos ${faltan / 60} min"
+            },
             style = MaterialTheme.typography.bodySmall
         )
         LinearProgressIndicator(
             progress = { if (total > 0) hechos.toFloat() / total else 0f },
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
         )
+        Text(
+            "Puedes salir de la pantalla: sigue en segundo plano y lo simulado se va guardando.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        TextButton(onClick = { GestorPredicciones.pararSimulacion() }) { Text("Parar") }
     } else {
         Text(
             "🧪 Simular los últimos sorteos",
@@ -1152,15 +1166,16 @@ private fun BotonSimular(progresoRelleno: Pair<Int, Int>?, onRellenarHistorial: 
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            "Cada sorteo se predice solo con los anteriores. 100 tarda unos minutos.",
+            "Cada sorteo se predice solo con los anteriores. Cuantos más, más fiable el ranking; " +
+                "los ya simulados no se repiten.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(10, 50, 100).forEach { n ->
+            listOf(100, 500, 1000).forEach { n ->
                 OutlinedButton(onClick = { onRellenarHistorial(n) }, modifier = Modifier.weight(1f)) {
-                    Text("$n")
+                    Text(if (n == 1000) "1.000" else "$n")
                 }
             }
         }
@@ -1175,7 +1190,7 @@ private fun DetalleMetodoDialog(
     ranking: List<EstadisticaMetodo>,
     minPremio: Int,
     prediccionesInfo: String,
-    progresoRelleno: Pair<Int, Int>?,
+    progresoRelleno: GestorPredicciones.EstadoSimulacion?,
     onRellenarHistorial: (Int) -> Unit,
     onCambiarMetodo: (String) -> Unit,
     onCerrar: () -> Unit

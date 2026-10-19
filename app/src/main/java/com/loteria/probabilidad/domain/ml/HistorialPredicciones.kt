@@ -30,8 +30,8 @@ class HistorialPredicciones(context: Context) {
     )
 
     companion object {
-        /** 100 simulados (botón "Simular") + margen para los reales. */
-        private const val MAX_HISTORIAL = 120
+        /** Hasta 1.000 simulados (botón "Simular") + margen para los reales. */
+        private const val MAX_HISTORIAL = 1100
 
         private val DIAS_SORTEO = mapOf(
             "PRIMITIVA" to listOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY),
@@ -274,6 +274,38 @@ class HistorialPredicciones(context: Context) {
         // Mantener solo los últimos MAX_HISTORIAL
         while (historial.size > MAX_HISTORIAL) historial.removeAt(historial.lastIndex)
 
+        escribirHistorial(tipoLoteria, historial)
+    }
+
+    /**
+     * Guarda de una vez una tanda de sorteos SIMULADOS (fecha, evaluaciones, reemplazar).
+     * Leer y escribir el historial entero por cada sorteo sería muy lento con 1.000.
+     * Mismas reglas que [guardarEvaluacion]: una real nunca se sustituye y una simulada
+     * solo si reemplazar = true.
+     */
+    fun guardarEvaluacionesSimuladas(
+        tipoLoteria: String,
+        tanda: List<Triple<String, List<ResultadoEvaluacion>, Boolean>>
+    ) {
+        if (tanda.isEmpty()) return
+        val historial = cargarHistorialInterno(tipoLoteria).toMutableList()
+        for ((fecha, evaluaciones, reemplazar) in tanda) {
+            val existente = historial.firstOrNull { it.fechaSorteo == fecha }
+            if (existente != null) {
+                if (!existente.simulado || !reemplazar) continue
+                historial.remove(existente)
+            }
+            val mejorEval = evaluaciones.maxByOrNull { it.aciertosNumeros }
+            historial.add(EntradaHistorial(
+                fechaSorteo = fecha,
+                evaluaciones = evaluaciones,
+                mejorMetodo = mejorEval?.metodo ?: "",
+                mejorAciertos = mejorEval?.aciertosNumeros ?: 0,
+                simulado = true
+            ))
+        }
+        historial.sortByDescending { it.fechaSorteo }
+        while (historial.size > MAX_HISTORIAL) historial.removeAt(historial.lastIndex)
         escribirHistorial(tipoLoteria, historial)
     }
 

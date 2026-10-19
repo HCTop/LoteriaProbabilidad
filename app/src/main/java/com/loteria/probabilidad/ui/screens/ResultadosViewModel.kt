@@ -77,9 +77,10 @@ class ResultadosViewModel(
     private val _rankingMetodos = MutableStateFlow<List<Triple<String, Double, Int>>>(emptyList())
     val rankingMetodos: StateFlow<List<Triple<String, Double, Int>>> = _rankingMetodos.asStateFlow()
 
-    // Relleno del historial con sorteos pasados simulados: (hechos, total) o null si no está en marcha
-    private val _progresoRelleno = MutableStateFlow<Pair<Int, Int>?>(null)
-    val progresoRelleno: StateFlow<Pair<Int, Int>?> = _progresoRelleno.asStateFlow()
+    // Simulación de sorteos pasados de ESTA lotería (o null). Vive en GestorPredicciones,
+    // así que sigue aunque se cierre la pantalla y al volver se ve por dónde va.
+    private val _progresoRelleno = MutableStateFlow<GestorPredicciones.EstadoSimulacion?>(null)
+    val progresoRelleno: StateFlow<GestorPredicciones.EstadoSimulacion?> = _progresoRelleno.asStateFlow()
 
     // Info de predicciones guardadas
     private val _prediccionesInfo = MutableStateFlow("")
@@ -454,23 +455,39 @@ class ResultadosViewModel(
      * Rellena el historial con los últimos [cuantos] sorteos simulados (walk-forward),
      * para no tener que esperar semanas a que haya sorteos evaluados.
      */
-    fun rellenarHistorial(cuantos: Int = 10) {
+    /**
+     * Simula los últimos [cuantos] sorteos (walk-forward) en segundo plano.
+     * El progreso llega por [progresoRelleno]; el historial se recarga cada tanda y al acabar.
+     */
+    fun rellenarHistorial(cuantos: Int = 100) {
         val tipo = tipoLoteriaActual ?: return
-        if (_progresoRelleno.value != null) return
-        _progresoRelleno.value = 0 to cuantos
+        gestorPredicciones.lanzarSimulacion(tipo, cuantos)
+    }
+
+    /** Para la simulación en curso (lo ya simulado se queda guardado). */
+    fun pararSimulacion() = GestorPredicciones.pararSimulacion()
+
+    private fun recargarHistorial(tipo: TipoLoteria) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _historialEvaluado.value = historialPredicciones.cargarHistorial(tipo.name)
+            _rankingMetodos.value = historialPredicciones.obtenerRankingMetodos(tipo.name)
+        }
+    }
+
+    init {
+        // Seguir la simulación: mostrar su progreso y recargar el historial cada 25 sorteos y al acabar
         viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    gestorPredicciones.rellenarHistorialSimulado(tipo, cuantos) { hechos, total ->
-                        _progresoRelleno.value = hechos to total
-                    }
-                    _historialEvaluado.value = historialPredicciones.cargarHistorial(tipo.name)
-                    _rankingMetodos.value = historialPredicciones.obtenerRankingMetodos(tipo.name)
+            var anterior: GestorPredicciones.EstadoSimulacion? = null
+            GestorPredicciones.simulacion.collect { estado ->
+                val tipo = tipoLoteriaActual
+                val mio = estado?.takeIf { it.tipo == tipo }
+                _progresoRelleno.value = mio
+                if (tipo != null) {
+                    val acabo = mio == null && anterior?.tipo == tipo
+                    val tanda = mio != null && mio.hechos > 0 && mio.hechos % 25 == 0 && mio.hechos != anterior?.hechos
+                    if (acabo || tanda) recargarHistorial(tipo)
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("ResultadosVM", "Error rellenando historial: ${e.message}", e)
-            } finally {
-                _progresoRelleno.value = null
+                anterior = estado
             }
         }
     }
