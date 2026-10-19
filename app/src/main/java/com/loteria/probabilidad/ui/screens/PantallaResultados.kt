@@ -74,6 +74,8 @@ fun PantallaResultados(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
+    progresoRelleno: Pair<Int, Int>? = null,
+    onRellenarHistorial: () -> Unit = {},
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
@@ -174,6 +176,8 @@ fun PantallaResultados(
                         historialEvaluado = historialEvaluado,
                         rankingMetodos = rankingMetodos,
                         prediccionesInfo = prediccionesInfo,
+                        progresoRelleno = progresoRelleno,
+                        onRellenarHistorial = onRellenarHistorial,
                         formulaAbuelo = formulaAbuelo,
                         boteActual = boteActual,
                         formulaAbueloCargando = formulaAbueloCargando,
@@ -259,6 +263,8 @@ private fun ResultadosContent(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial> = emptyList(),
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
+    progresoRelleno: Pair<Int, Int>? = null,
+    onRellenarHistorial: () -> Unit = {},
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
@@ -281,12 +287,20 @@ private fun ResultadosContent(
             )
         }
 
-        // Tarjeta de evaluación y ranking de métodos
-        if (historialEvaluado.isNotEmpty()) {
+        // Historial de predicciones: qué ha acertado cada método en cada sorteo.
+        // Se muestra siempre en loterías de bolas (aunque esté vacío, explica por qué).
+        if (tipoLoteria in listOf(
+                TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO,
+                TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA
+            )
+        ) {
             item {
                 EvaluacionCard(
                     historialEvaluado = historialEvaluado,
-                    rankingMetodos = rankingMetodos
+                    tipoLoteria = tipoLoteria,
+                    prediccionesInfo = prediccionesInfo,
+                    progresoRelleno = progresoRelleno,
+                    onRellenarHistorial = onRellenarHistorial
                 )
             }
         }
@@ -394,20 +408,6 @@ private fun ResultadosContent(
         if (analisis.probabilidadTeorica.isNotEmpty()) {
             item {
                 ProbabilidadTeoricaCard(probabilidad = analisis.probabilidadTeorica)
-            }
-        }
-
-        // MEJORA 13: Historial de predicciones
-        if (estadisticasPredicciones.isNotEmpty()) {
-            item {
-                HistorialPrediccionesCard(
-                    totalPredicciones = (estadisticasPredicciones["totalPredicciones"] as? Int) ?: 0,
-                    prediccionesEvaluadas = (estadisticasPredicciones["prediccionesEvaluadas"] as? Int) ?: 0,
-                    promedioAciertos = (estadisticasPredicciones["promedioAciertos"] as? Double) ?: 0.0,
-                    mejorAcierto = (estadisticasPredicciones["mejorAcierto"] as? Int) ?: 0,
-                    porcentajeConAciertos = (estadisticasPredicciones["porcentajeConAciertos"] as? Double) ?: 0.0,
-                    onVerHistorial = { /* TODO: Navegar al historial completo */ }
-                )
             }
         }
 
@@ -797,73 +797,158 @@ private fun EmptyStateCard(
 @Composable
 private fun EvaluacionCard(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
-    rankingMetodos: List<Triple<String, Double, Int>>,
+    tipoLoteria: TipoLoteria,
+    prediccionesInfo: String,
+    progresoRelleno: Pair<Int, Int>?,
+    onRellenarHistorial: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Por defecto se ve el último sorteo; el resto se despliega
     var verTodos by remember { mutableStateOf(false) }
-    var verRanking by remember { mutableStateOf(false) }
-    val visibles = if (verTodos) historialEvaluado.take(15) else historialEvaluado.take(1)
+    // Aciertos mínimos que ya dan premio
+    val minPremio = if (tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO) 3 else 2
+    val estadisticas = remember(historialEvaluado) { estadisticasPorMetodo(historialEvaluado, minPremio) }
+    val numSimulados = historialEvaluado.count { it.simulado }
+    val verde = Color(0xFF2E7D32)
 
     ElevatedCard(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Rendimiento de Predicciones",
+                text = "Historial de predicciones",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            Text(
-                text = "Lo que se guardó ANTES de cada sorteo, comparado con el resultado real",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            visibles.forEach { entrada ->
-                Spacer(modifier = Modifier.height(12.dp))
-                SorteoEvaluadoBloque(entrada)
+            if (prediccionesInfo.isNotBlank()) {
+                Text(
+                    text = "⏳ $prediccionesInfo — se evaluarán cuando salga el resultado",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
-            if (historialEvaluado.size > 1) {
-                TextButton(onClick = { verTodos = !verTodos }) {
-                    Text(
-                        if (verTodos) "Ver solo el último sorteo"
-                        else "Ver sorteos anteriores (${historialEvaluado.size - 1})"
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Ranking histórico de métodos
-            if (rankingMetodos.isNotEmpty()) {
-                TextButton(onClick = { verRanking = !verRanking }) {
-                    Text(
-                        if (verRanking) "Ocultar ranking"
-                        else "Ranking de métodos (${historialEvaluado.size} sorteos)"
-                    )
+            if (historialEvaluado.isEmpty()) {
+                Text(
+                    text = "Aún no hay sorteos evaluados. Cada combinación se guarda ANTES del " +
+                        "sorteo y se compara con el resultado real cuando sale.\n\n" +
+                        "Si no quieres esperar, puedes simular los últimos sorteos: para cada uno " +
+                        "se generan las combinaciones usando SOLO los sorteos anteriores a su fecha.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                // ── Tabla por método ──
+                Text(
+                    text = "Por método (${historialEvaluado.size} sorteos" +
+                        (if (numSimulados > 0) ", $numSimulados simulados" else "") + ")",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Método", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Text("Media", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp), textAlign = TextAlign.End)
+                    Text("Máx", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
+                    Text("Premio", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(48.dp), textAlign = TextAlign.End)
+                    Text("Ganó", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
                 }
-                if (verRanking) {
-                    rankingMetodos.forEachIndexed { index, (metodo, promedio, mejor) ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "${index + 1}. $metodo",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1
-                            )
-                            Text(
-                                text = "${"%.2f".format(promedio)} media | $mejor máx",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                estadisticas.forEach { e ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(e.metodo, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(1f))
+                        Text("%.2f".format(e.media), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(44.dp), textAlign = TextAlign.End)
+                        Text("${e.maximo}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
+                        Text(
+                            "${e.premios}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (e.premios > 0) FontWeight.Bold else FontWeight.Normal,
+                            color = if (e.premios > 0) verde else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.width(48.dp), textAlign = TextAlign.End
+                        )
+                        Text("${e.victorias}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
                     }
+                }
+                Text(
+                    text = "Premio = sorteos con $minPremio+ aciertos. Ganó = sorteos en que fue el que más acertó (empates cuentan para todos).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                // ── Detalle por sorteo ──
+                val visibles = if (verTodos) historialEvaluado.take(20) else historialEvaluado.take(1)
+                visibles.forEach { entrada ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SorteoEvaluadoBloque(entrada)
+                }
+                if (historialEvaluado.size > 1) {
+                    TextButton(onClick = { verTodos = !verTodos }) {
+                        Text(
+                            if (verTodos) "Ver solo el último sorteo"
+                            else "Ver todos los sorteos (${historialEvaluado.size})"
+                        )
+                    }
+                }
+            }
+
+            // ── Simular sorteos pasados ──
+            Spacer(modifier = Modifier.height(8.dp))
+            if (progresoRelleno != null) {
+                val (hechos, total) = progresoRelleno
+                Text(
+                    "Simulando sorteos pasados… $hechos/$total",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                LinearProgressIndicator(
+                    progress = { if (total > 0) hechos.toFloat() / total else 0f },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                )
+            } else {
+                OutlinedButton(onClick = onRellenarHistorial, modifier = Modifier.fillMaxWidth()) {
+                    Text("🧪 Simular los últimos 10 sorteos")
                 }
             }
         }
     }
+}
+
+/** Estadística de un método a lo largo del historial. */
+private data class EstadisticaMetodo(
+    val metodo: String,
+    val sorteos: Int,
+    val media: Double,
+    val maximo: Int,
+    val premios: Int,
+    val victorias: Int
+)
+
+private fun estadisticasPorMetodo(
+    historial: List<HistorialPredicciones.EntradaHistorial>,
+    minPremio: Int
+): List<EstadisticaMetodo> {
+    val aciertos = mutableMapOf<String, MutableList<Int>>()
+    val victorias = mutableMapOf<String, Int>()
+    for (entrada in historial) {
+        val max = entrada.evaluaciones.maxOfOrNull { it.aciertosNumeros } ?: continue
+        for (eval in entrada.evaluaciones) {
+            aciertos.getOrPut(eval.metodo) { mutableListOf() }.add(eval.aciertosNumeros)
+            if (eval.aciertosNumeros == max && max > 0) {
+                victorias[eval.metodo] = (victorias[eval.metodo] ?: 0) + 1
+            }
+        }
+    }
+    return aciertos.map { (metodo, lista) ->
+        EstadisticaMetodo(
+            metodo = metodo,
+            sorteos = lista.size,
+            media = lista.average(),
+            maximo = lista.maxOrNull() ?: 0,
+            premios = lista.count { it >= minPremio },
+            victorias = victorias[metodo] ?: 0
+        )
+    }.sortedWith(compareByDescending<EstadisticaMetodo> { it.media }.thenByDescending { it.premios })
 }
 
 /** Un sorteo evaluado: números reales + cada combinación guardada con sus aciertos marcados. */
@@ -881,7 +966,7 @@ private fun SorteoEvaluadoBloque(entrada: HistorialPredicciones.EntradaHistorial
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "Sorteo ${entrada.fechaSorteo}",
+                text = "Sorteo ${entrada.fechaSorteo}" + if (entrada.simulado) "  🧪 simulado" else "",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold
             )

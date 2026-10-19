@@ -173,7 +173,27 @@ class HistorialPredicciones(context: Context) {
 
         val predicciones = cargarPredicciones(tipoLoteria, fechaSorteo) ?: return null
 
-        val evaluaciones = predicciones.map { pred ->
+        val evaluaciones = calcularEvaluaciones(predicciones, numerosReales, complementariosReales)
+
+        // Guardar evaluación en historial
+        guardarEvaluacion(tipoLoteria, fechaSorteo, evaluaciones)
+
+        // Marcar como evaluado
+        prefs.edit().putString("eval_${tipoLoteria}_$fechaSorteo", "done").apply()
+
+        return evaluaciones
+    }
+
+    /**
+     * Compara una lista de combinaciones con el resultado real de un sorteo.
+     * El nombre del método sale de la primera línea de la explicación.
+     */
+    fun calcularEvaluaciones(
+        predicciones: List<CombinacionSugerida>,
+        numerosReales: List<Int>,
+        complementariosReales: List<Int> = emptyList()
+    ): List<ResultadoEvaluacion> {
+        return predicciones.map { pred ->
             val aciertosNumeros = pred.numeros.count { it in numerosReales }
             val aciertosComplementarios = pred.complementarios.count { it in complementariosReales }
 
@@ -189,15 +209,22 @@ class HistorialPredicciones(context: Context) {
                 numerosReales = numerosReales
             )
         }
-
-        // Guardar evaluación en historial
-        guardarEvaluacion(tipoLoteria, fechaSorteo, evaluaciones)
-
-        // Marcar como evaluado
-        prefs.edit().putString("eval_${tipoLoteria}_$fechaSorteo", "done").apply()
-
-        return evaluaciones
     }
+
+    /**
+     * Guarda una evaluación SIMULADA de un sorteo pasado: predicciones generadas solo con
+     * los sorteos anteriores a esa fecha (walk-forward). Sirve para tener historial desde
+     * el primer día. No toca el aprendizaje. Si ese sorteo ya tiene evaluación real, no hace nada.
+     */
+    fun guardarEvaluacionSimulada(
+        tipoLoteria: String,
+        fechaSorteo: String,
+        evaluaciones: List<ResultadoEvaluacion>
+    ) = guardarEvaluacion(tipoLoteria, fechaSorteo, evaluaciones, simulado = true)
+
+    /** ¿Hay ya una entrada (real o simulada) para ese sorteo? */
+    fun tieneEntradaHistorial(tipoLoteria: String, fechaSorteo: String): Boolean =
+        cargarHistorialInterno(tipoLoteria).any { it.fechaSorteo == fechaSorteo }
 
     /**
      * Comprueba si un sorteo ya fue evaluado.
@@ -212,23 +239,31 @@ class HistorialPredicciones(context: Context) {
     private fun guardarEvaluacion(
         tipoLoteria: String,
         fechaSorteo: String,
-        evaluaciones: List<ResultadoEvaluacion>
+        evaluaciones: List<ResultadoEvaluacion>,
+        simulado: Boolean = false
     ) {
         val historial = cargarHistorialInterno(tipoLoteria).toMutableList()
 
-        // No duplicar
-        if (historial.any { it.fechaSorteo == fechaSorteo }) return
+        // No duplicar. Una evaluación REAL sí sustituye a una simulada del mismo sorteo.
+        val existente = historial.firstOrNull { it.fechaSorteo == fechaSorteo }
+        if (existente != null) {
+            if (simulado || !existente.simulado) return
+            historial.remove(existente)
+        }
 
         val mejorEval = evaluaciones.maxByOrNull { it.aciertosNumeros }
-        historial.add(0, EntradaHistorial(
+        historial.add(EntradaHistorial(
             fechaSorteo = fechaSorteo,
             evaluaciones = evaluaciones,
             mejorMetodo = mejorEval?.metodo ?: "",
-            mejorAciertos = mejorEval?.aciertosNumeros ?: 0
+            mejorAciertos = mejorEval?.aciertosNumeros ?: 0,
+            simulado = simulado
         ))
+        // Siempre del más reciente al más antiguo (el relleno simulado mete sorteos viejos)
+        historial.sortByDescending { it.fechaSorteo }
 
         // Mantener solo los últimos MAX_HISTORIAL
-        while (historial.size > MAX_HISTORIAL) historial.removeLast()
+        while (historial.size > MAX_HISTORIAL) historial.removeAt(historial.lastIndex)
 
         // Serializar y guardar
         val jsonArray = JSONArray()
@@ -237,6 +272,7 @@ class HistorialPredicciones(context: Context) {
                 put("fechaSorteo", entrada.fechaSorteo)
                 put("mejorMetodo", entrada.mejorMetodo)
                 put("mejorAciertos", entrada.mejorAciertos)
+                put("simulado", entrada.simulado)
                 put("evaluaciones", JSONArray().apply {
                     for (eval in entrada.evaluaciones) {
                         put(JSONObject().apply {
@@ -286,7 +322,8 @@ class HistorialPredicciones(context: Context) {
                     fechaSorteo = obj.getString("fechaSorteo"),
                     evaluaciones = evaluaciones,
                     mejorMetodo = obj.getString("mejorMetodo"),
-                    mejorAciertos = obj.getInt("mejorAciertos")
+                    mejorAciertos = obj.getInt("mejorAciertos"),
+                    simulado = obj.optBoolean("simulado", false)
                 )
             }
         } catch (e: Exception) {
@@ -374,6 +411,8 @@ class HistorialPredicciones(context: Context) {
         val fechaSorteo: String,
         val evaluaciones: List<ResultadoEvaluacion>,
         val mejorMetodo: String,
-        val mejorAciertos: Int
+        val mejorAciertos: Int,
+        /** true = reconstruido a posteriori con walk-forward, no guardado antes del sorteo */
+        val simulado: Boolean = false
     )
 }

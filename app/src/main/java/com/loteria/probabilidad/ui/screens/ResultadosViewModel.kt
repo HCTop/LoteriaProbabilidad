@@ -74,6 +74,10 @@ class ResultadosViewModel(
     private val _rankingMetodos = MutableStateFlow<List<Triple<String, Double, Int>>>(emptyList())
     val rankingMetodos: StateFlow<List<Triple<String, Double, Int>>> = _rankingMetodos.asStateFlow()
 
+    // Relleno del historial con sorteos pasados simulados: (hechos, total) o null si no está en marcha
+    private val _progresoRelleno = MutableStateFlow<Pair<Int, Int>?>(null)
+    val progresoRelleno: StateFlow<Pair<Int, Int>?> = _progresoRelleno.asStateFlow()
+
     // Info de predicciones guardadas
     private val _prediccionesInfo = MutableStateFlow("")
     val prediccionesInfo: StateFlow<String> = _prediccionesInfo.asStateFlow()
@@ -378,6 +382,31 @@ class ResultadosViewModel(
     }
 
     // ==================== ACCIONES DEL USUARIO ====================
+
+    /**
+     * Rellena el historial con los últimos [cuantos] sorteos simulados (walk-forward),
+     * para no tener que esperar semanas a que haya sorteos evaluados.
+     */
+    fun rellenarHistorial(cuantos: Int = 10) {
+        val tipo = tipoLoteriaActual ?: return
+        if (_progresoRelleno.value != null) return
+        _progresoRelleno.value = 0 to cuantos
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    gestorPredicciones.rellenarHistorialSimulado(tipo, cuantos) { hechos, total ->
+                        _progresoRelleno.value = hechos to total
+                    }
+                    _historialEvaluado.value = historialPredicciones.cargarHistorial(tipo.name)
+                    _rankingMetodos.value = historialPredicciones.obtenerRankingMetodos(tipo.name)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ResultadosVM", "Error rellenando historial: ${e.message}", e)
+            } finally {
+                _progresoRelleno.value = null
+            }
+        }
+    }
 
     fun analizarRareza(combinacion: List<Int>, maxNumero: Int): MotorInteligencia.AnalisisRareza {
         return motorIA.analizarRarezaCombinacion(combinacion, maxNumero)

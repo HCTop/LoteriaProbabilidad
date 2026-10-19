@@ -75,6 +75,63 @@ class GestorPredicciones(
         }
 
     /**
+     * Rellena el historial con los últimos [cuantos] sorteos SIMULADOS (walk-forward):
+     * para cada sorteo pasado se generan las combinaciones de todos los métodos usando
+     * SOLO los sorteos anteriores a su fecha, y se comparan con el resultado real.
+     *
+     * - Las entradas quedan marcadas como simuladas (la UI lo indica).
+     * - No se toca el aprendizaje de la IA (sería entrenar dos veces con lo mismo).
+     * - Se salta los sorteos que ya tienen evaluación (real o simulada).
+     *
+     * @param progreso (hechos, total) para ir mostrando el avance
+     * @return número de sorteos añadidos
+     */
+    fun rellenarHistorialSimulado(
+        tipoLoteria: TipoLoteria,
+        cuantos: Int = 10,
+        progreso: (Int, Int) -> Unit = { _, _ -> }
+    ): Int = synchronized(candado(tipoLoteria)) {
+        if (tipoLoteria !in LOTERIAS_EVALUABLES) return@synchronized 0
+
+        // (fecha, números, complementarios) del más antiguo al más reciente
+        val sorteos = sorteosRecientes(tipoLoteria, cuantos).reversed()
+        var anadidos = 0
+        sorteos.forEachIndexed { i, (fecha, numeros, complementarios) ->
+            progreso(i, sorteos.size)
+            if (historialPredicciones.tieneEntradaHistorial(tipoLoteria.name, fecha)) return@forEachIndexed
+            try {
+                val hasta = java.time.LocalDate.parse(fecha).minusDays(1).toString()
+                val analisis = obtenerCombinacionesUseCase.ejecutarTodosMetodos(
+                    tipoLoteria = tipoLoteria,
+                    rangoFechas = RangoFechas(null, hasta) // solo el pasado de ese sorteo
+                )
+                val evaluaciones = historialPredicciones.calcularEvaluaciones(
+                    analisis.combinacionesSugeridas, numeros, complementarios
+                )
+                historialPredicciones.guardarEvaluacionSimulada(tipoLoteria.name, fecha, evaluaciones)
+                anadidos++
+            } catch (e: Exception) {
+                android.util.Log.e("GestorPredicciones", "Simulación $fecha falló: ${e.message}", e)
+            }
+        }
+        progreso(sorteos.size, sorteos.size)
+        anadidos
+    }
+
+    private fun sorteosRecientes(tipo: TipoLoteria, n: Int): List<Triple<String, List<Int>, List<Int>>> =
+        when (tipo) {
+            TipoLoteria.PRIMITIVA -> repository.obtenerHistoricoPrimitiva().take(n)
+                .map { Triple(it.fecha, it.numeros, listOf(it.reintegro)) }
+            TipoLoteria.BONOLOTO -> repository.obtenerHistoricoBonoloto().take(n)
+                .map { Triple(it.fecha, it.numeros, listOf(it.reintegro)) }
+            TipoLoteria.EUROMILLONES -> repository.obtenerHistoricoEuromillones().take(n)
+                .map { Triple(it.fecha, it.numeros, it.estrellas) }
+            TipoLoteria.GORDO_PRIMITIVA -> repository.obtenerHistoricoGordoPrimitiva().take(n)
+                .map { Triple(it.fecha, it.numeros, listOf(it.numeroClave)) }
+            else -> emptyList()
+        }
+
+    /**
      * Evalúa todo lo pendiente y deja guardadas las predicciones del próximo sorteo
      * de todas las loterías de bolas. Pensado para lanzarse al abrir la app.
      */

@@ -113,6 +113,7 @@ fun LoteriaProbabilidadApp(
             val historialEvaluado by viewModel.historialEvaluado.collectAsState()
             val rankingMetodos by viewModel.rankingMetodos.collectAsState()
             val prediccionesInfo by viewModel.prediccionesInfo.collectAsState()
+            val progresoRelleno by viewModel.progresoRelleno.collectAsState()
             // Fórmula del Abuelo
             val formulaAbuelo by viewModel.formulaAbuelo.collectAsState()
             val boteActual by viewModel.boteActual.collectAsState()
@@ -136,6 +137,8 @@ fun LoteriaProbabilidadApp(
                 historialEvaluado = historialEvaluado,
                 rankingMetodos = rankingMetodos,
                 prediccionesInfo = prediccionesInfo,
+                progresoRelleno = progresoRelleno,
+                onRellenarHistorial = { viewModel.rellenarHistorial() },
                 formulaAbuelo = formulaAbuelo,
                 boteActual = boteActual,
                 formulaAbueloCargando = formulaAbueloCargando,
