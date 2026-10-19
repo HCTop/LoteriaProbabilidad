@@ -102,19 +102,25 @@ class SeleccionViewModel(
 
         // Próximo día de sorteo
         val diasSorteo = obtenerDiasSorteo(tipo)
-        val proximoSorteo = if (diasSorteo.isNotEmpty()) {
-            (0L..7L).map { hoy.plusDays(it) }
+        val proximoSorteo = when {
+            tipo == TipoLoteria.NAVIDAD -> proximaFechaAnual(hoy, 12, 22)
+            tipo == TipoLoteria.NINO -> proximaFechaAnual(hoy, 1, 6)
+            diasSorteo.isNotEmpty() -> (0L..7L).map { hoy.plusDays(it) }
                 .first { it.dayOfWeek.value in diasSorteo }
-        } else {
-            hoy
+            else -> hoy
         }
-        val proximoDiaNombre = diasSemana[proximoSorteo.dayOfWeek.value - 1]
+        val proximoDiaNombre = if (tipo == TipoLoteria.NAVIDAD || tipo == TipoLoteria.NINO) {
+            "${diasSemana[proximoSorteo.dayOfWeek.value - 1]} ${proximoSorteo.dayOfMonth}/${proximoSorteo.monthValue}"
+        } else {
+            diasSemana[proximoSorteo.dayOfWeek.value - 1]
+        }
 
         // Obtener último sorteo
         val (ultimoNumeros, ultimoFecha, ultimoComp1, ultimoComp2) = obtenerUltimoSorteo(tipo)
 
         // Evaluar qué método habría acertado más en el último sorteo
-        val (metodoMejor, aciertos, numerosAcertados) = evaluarMejorMetodoEnUltimoSorteo(tipo, ultimoNumeros)
+        val (metodoMejor, aciertos, numerosAcertados) =
+            evaluarMejorMetodoEnUltimoSorteo(tipo, ultimoNumeros, ultimoFecha)
 
         // Usar el método que mejor funcionó, o ENSEMBLE_VOTING por defecto
         val mejorMetodo = metodoMejor ?: MetodoCalculo.ENSEMBLE_VOTING
@@ -237,9 +243,20 @@ class SeleccionViewModel(
      */
     private fun evaluarMejorMetodoEnUltimoSorteo(
         tipo: TipoLoteria,
-        ultimoSorteoNumeros: List<Int>
+        ultimoSorteoNumeros: List<Int>,
+        ultimoSorteoFecha: String
     ): Triple<MetodoCalculo?, Int, List<Int>> {
         if (ultimoSorteoNumeros.isEmpty()) return Triple(null, 0, emptyList())
+
+        // Para que la evaluación sea honesta, cada método solo puede ver los sorteos
+        // ANTERIORES al último. Antes se usaba el histórico completo (incluido el propio
+        // sorteo que se evaluaba), así que los métodos de "calientes" lo "acertaban" con trampa.
+        val hastaDiaAnterior = try {
+            java.time.LocalDate.parse(ultimoSorteoFecha).minusDays(1).toString()
+        } catch (e: Exception) {
+            return Triple(null, 0, emptyList())
+        }
+        val rangoSinUltimo = RangoFechas(null, hastaDiaAnterior)
 
         // Para Nacional/Navidad/Niño no hacemos esta evaluación (son dígitos, no números)
         if (tipo in listOf(TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO)) {
@@ -265,7 +282,7 @@ class SeleccionViewModel(
                 val analisis = obtenerCombinacionesUseCase.ejecutar(
                     tipoLoteria = tipo,
                     numCombinaciones = 1,
-                    rangoFechas = RangoFechas(null, null),
+                    rangoFechas = rangoSinUltimo,
                     metodo = metodo
                 )
 
@@ -322,6 +339,11 @@ class SeleccionViewModel(
         }
     }
 
+    private fun proximaFechaAnual(hoy: java.time.LocalDate, mes: Int, dia: Int): java.time.LocalDate {
+        val esteAno = java.time.LocalDate.of(hoy.year, mes, dia)
+        return if (hoy.isAfter(esteAno)) esteAno.plusYears(1) else esteAno
+    }
+
     private fun obtenerDiasSorteo(tipo: TipoLoteria): List<Int> {
         return when (tipo) {
             TipoLoteria.PRIMITIVA -> listOf(1, 4, 6)
@@ -334,7 +356,12 @@ class SeleccionViewModel(
         }
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    /**
+     * Usa applicationContext: el ViewModel sobrevive a la Activity (rotaciones),
+     * y guardar el Context de la Activity la dejaría filtrada en memoria.
+     */
+    class Factory(context: Context) : ViewModelProvider.Factory {
+        private val context: Context = context.applicationContext
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val dataSource = LoteriaLocalDataSource(context)

@@ -763,6 +763,24 @@ class MemoriaIA(context: Context) {
     fun registrarRendimientoEstrategias(
         aciertosEstrategia: Map<MotorInteligencia.EstrategiaPrediccion, Int>,
         tipoLoteria: String
+    ) = procesarRendimientoEstrategias(
+        aciertosEstrategia.mapValues { it.value.toDouble() }, tipoLoteria
+    )
+
+    /**
+     * Igual que [registrarRendimientoEstrategias] pero acepta aciertos medios en Double
+     * (p. ej. la media de un lote de 10 iteraciones de AprendizajeContinuo).
+     * @JvmName evita el choque de firmas por borrado de tipos (Map<_, Int> vs Map<_, Double>).
+     */
+    @JvmName("registrarRendimientoEstrategiasMedias")
+    fun registrarRendimientoEstrategias(
+        aciertosEstrategia: Map<MotorInteligencia.EstrategiaPrediccion, Double>,
+        tipoLoteria: String
+    ) = procesarRendimientoEstrategias(aciertosEstrategia, tipoLoteria)
+
+    private fun procesarRendimientoEstrategias(
+        aciertosEstrategia: Map<MotorInteligencia.EstrategiaPrediccion, Double>,
+        tipoLoteria: String
     ) {
         // Guardar el sorteo actual en el historial ANTES de calcular promedios
         registrarHistorialEstrategias(aciertosEstrategia, tipoLoteria)
@@ -779,7 +797,7 @@ class MemoriaIA(context: Context) {
         // Usar promedios de ventana si hay suficientes datos; si no, el sorteo individual
         val aciertosEfectivos: Map<MotorInteligencia.EstrategiaPrediccion, Double> =
             if (promediosVentana.size == aciertosEstrategia.size) promediosVentana
-            else aciertosEstrategia.mapValues { it.value.toDouble() }
+            else aciertosEstrategia
 
         val promedioGlobal = aciertosEfectivos.values.average()
 
@@ -838,7 +856,7 @@ class MemoriaIA(context: Context) {
      * MEJORA 9: Registra el historial de rendimiento de estrategias.
      */
     private fun registrarHistorialEstrategias(
-        aciertos: Map<MotorInteligencia.EstrategiaPrediccion, Int>,
+        aciertos: Map<MotorInteligencia.EstrategiaPrediccion, Double>,
         tipoLoteria: String
     ) {
         val key = "historial_estrategias_$tipoLoteria"

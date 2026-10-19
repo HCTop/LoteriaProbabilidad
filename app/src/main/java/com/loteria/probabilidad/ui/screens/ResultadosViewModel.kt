@@ -686,6 +686,9 @@ class ResultadosViewModel(
      * No recarga el histórico completo.
      */
     fun recargarSiNecesario() {
+        // Si la carga inicial sigue en marcha todavía no hay caché: sin este guard,
+        // el primer ON_RESUME lanzaba una SEGUNDA generación en paralelo.
+        if (_uiState.value is ResultadosUiState.Loading) return
         tipoLoteriaActual?.let { tipo ->
             val proximoSorteo = historialPredicciones.proximoSorteo(tipo.name)
             val fechaSorteo = proximoSorteo.toString()
@@ -711,7 +714,12 @@ class ResultadosViewModel(
     /**
      * Factory para crear el ViewModel con dependencias.
      */
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    /**
+     * Usa applicationContext: el ViewModel sobrevive a la Activity (rotaciones),
+     * y guardar el Context de la Activity la dejaría filtrada en memoria.
+     */
+    class Factory(context: Context) : ViewModelProvider.Factory {
+        private val context: Context = context.applicationContext
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val dataSource = LoteriaLocalDataSource(context)

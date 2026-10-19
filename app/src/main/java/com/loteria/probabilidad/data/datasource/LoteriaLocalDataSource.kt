@@ -38,10 +38,42 @@ class LoteriaLocalDataSource(private val context: Context) {
         return null
     }
 
+    // ─── Caché en memoria ────────────────────────────────────────────────
+    // Antes cada pantalla/ViewModel volvía a parsear el CSV completo (Bonoloto
+    // tiene más de 9.000 filas) varias veces por carga. Ahora se parsea una vez
+    // por proceso y se invalida sola cuando ActualizadorHistorico descarga
+    // un CSV nuevo (cambia lastModified/tamaño del archivo).
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> conCache(archivoCSV: String, clave: String, leer: () -> List<T>): List<T> {
+        val descargado = File(context.filesDir, archivoCSV)
+        val version = if (descargado.exists()) descargado.lastModified() * 31 + descargado.length() else -1L
+        val k = "$clave|$archivoCSV"
+        cache[k]?.let { (v, datos) -> if (v == version) return datos as List<T> }
+        val datos = leer()
+        if (datos.isNotEmpty()) cache[k] = version to datos
+        return datos
+    }
+
+    fun leerHistoricoPrimitiva(tipoLoteria: TipoLoteria): List<ResultadoPrimitiva> =
+        conCache(tipoLoteria.archivoCSV, "primitiva") { leerHistoricoPrimitivaSinCache(tipoLoteria) }
+
+    fun leerHistoricoEuromillones(): List<ResultadoEuromillones> =
+        conCache(TipoLoteria.EUROMILLONES.archivoCSV, "euro") { leerHistoricoEuromillonesSinCache() }
+
+    fun leerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> =
+        conCache(TipoLoteria.GORDO_PRIMITIVA.archivoCSV, "gordo") { leerHistoricoGordoPrimitivaSinCache() }
+
+    fun leerHistoricoNacional(tipoLoteria: TipoLoteria): List<ResultadoNacional> =
+        conCache(tipoLoteria.archivoCSV, "nacional") { leerHistoricoNacionalSinCache(tipoLoteria) }
+
+    fun leerHistoricoNavidad(): List<ResultadoNavidad> =
+        conCache(TipoLoteria.NAVIDAD.archivoCSV, "navidad") { leerHistoricoNavidadSinCache() }
+
     /**
      * Lee el histórico de La Primitiva o Bonoloto desde CSV.
      */
-    fun leerHistoricoPrimitiva(tipoLoteria: TipoLoteria): List<ResultadoPrimitiva> {
+    private fun leerHistoricoPrimitivaSinCache(tipoLoteria: TipoLoteria): List<ResultadoPrimitiva> {
         val resultados = mutableListOf<ResultadoPrimitiva>()
         
         try {
@@ -87,7 +119,7 @@ class LoteriaLocalDataSource(private val context: Context) {
     /**
      * Lee el histórico de Euromillones desde CSV.
      */
-    fun leerHistoricoEuromillones(): List<ResultadoEuromillones> {
+    private fun leerHistoricoEuromillonesSinCache(): List<ResultadoEuromillones> {
         val resultados = mutableListOf<ResultadoEuromillones>()
         
         try {
@@ -133,7 +165,7 @@ class LoteriaLocalDataSource(private val context: Context) {
     /**
      * Lee el histórico de El Gordo de la Primitiva desde CSV.
      */
-    fun leerHistoricoGordoPrimitiva(): List<ResultadoGordoPrimitiva> {
+    private fun leerHistoricoGordoPrimitivaSinCache(): List<ResultadoGordoPrimitiva> {
         val resultados = mutableListOf<ResultadoGordoPrimitiva>()
         
         try {
@@ -176,7 +208,7 @@ class LoteriaLocalDataSource(private val context: Context) {
     /**
      * Lee el histórico de Lotería Nacional o El Niño desde CSV.
      */
-    fun leerHistoricoNacional(tipoLoteria: TipoLoteria): List<ResultadoNacional> {
+    private fun leerHistoricoNacionalSinCache(tipoLoteria: TipoLoteria): List<ResultadoNacional> {
         val resultados = mutableListOf<ResultadoNacional>()
         
         try {
@@ -225,7 +257,7 @@ class LoteriaLocalDataSource(private val context: Context) {
     /**
      * Lee el histórico de El Gordo de Navidad desde CSV.
      */
-    fun leerHistoricoNavidad(): List<ResultadoNavidad> {
+    private fun leerHistoricoNavidadSinCache(): List<ResultadoNavidad> {
         val resultados = mutableListOf<ResultadoNavidad>()
         
         try {
@@ -285,6 +317,12 @@ class LoteriaLocalDataSource(private val context: Context) {
     }
 
     companion object {
+        /** Caché compartida por todas las instancias (clave → versión del archivo, datos). */
+        private val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<*>>>()
+
+        /** Vacía la caché (p. ej. tras una actualización manual de datos). */
+        fun limpiarCache() = cache.clear()
+
         /**
          * Filtra resultados por rango de fechas.
          * Las fechas deben estar en formato YYYY-MM-DD.

@@ -225,18 +225,25 @@ def parsear_csv_euromillones(contenido: str) -> list:
                 except ValueError:
                     pass
             
-            # Las estrellas vienen después de los 5 números
-            for i in range(fecha_col + 6, min(fecha_col + 8, len(campos))):
+            # Las estrellas vienen después de los 5 números.
+            # OJO: la hoja de lotoideas tiene una columna VACÍA entre los números
+            # y las estrellas (FECHA,N1..N5,,E1,E2). Antes se leían solo 2 columnas
+            # fijas, se cogía la vacía + E1 y la 2ª estrella se rellenaba con 1.
+            # Ahora se recogen los 2 primeros valores no vacíos tras los números.
+            for i in range(fecha_col + 6, len(campos)):
+                if len(estrellas) == 2:
+                    break
+                if not campos[i]:
+                    continue
                 try:
                     e = int(campos[i])
                     if 1 <= e <= 12:
                         estrellas.append(e)
                 except ValueError:
                     pass
-            
-            if len(numeros) == 5 and len(estrellas) >= 1:
-                if len(estrellas) == 1:
-                    estrellas.append(1)
+
+            # Sin las 2 estrellas reales el sorteo se descarta (nunca inventar datos)
+            if len(numeros) == 5 and len(estrellas) == 2:
                 resultados.append({
                     'fecha': fecha,
                     'numeros': numeros,

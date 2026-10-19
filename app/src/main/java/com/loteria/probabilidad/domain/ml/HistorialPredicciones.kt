@@ -54,6 +54,11 @@ class HistorialPredicciones(context: Context) {
      */
     fun proximoSorteo(tipoLoteria: String): LocalDate {
         val hoy = LocalDate.now()
+        // Sorteos anuales con fecha fija (antes devolvían "hoy")
+        when (tipoLoteria) {
+            "NAVIDAD" -> return proximaFechaAnual(hoy, 12, 22)
+            "NINO" -> return proximaFechaAnual(hoy, 1, 6)
+        }
         val diasSorteo = DIAS_SORTEO[tipoLoteria]
         if (diasSorteo.isNullOrEmpty()) return hoy
         // Si hoy es día de sorteo pero ya pasaron las 22:00, el sorteo ya ocurrió
@@ -62,6 +67,12 @@ class HistorialPredicciones(context: Context) {
         val inicio = if (sorteoHoyYaPaso) 1L else 0L
         return (inicio..7L).map { hoy.plusDays(it) }
             .first { it.dayOfWeek in diasSorteo }
+    }
+
+    /** Próxima ocurrencia (hoy incluido) de un día/mes fijo: 22-dic Navidad, 6-ene Niño. */
+    private fun proximaFechaAnual(hoy: LocalDate, mes: Int, dia: Int): LocalDate {
+        val esteAno = LocalDate.of(hoy.year, mes, dia)
+        return if (hoy.isAfter(esteAno)) esteAno.plusYears(1) else esteAno
     }
 
     /**

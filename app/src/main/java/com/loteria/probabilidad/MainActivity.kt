@@ -35,7 +35,8 @@ class MainActivity : ComponentActivity() {
     private var estaAutenticado by mutableStateOf(false)
 
     // Aprendizaje continuo mientras el app está visible
-    private val aprendizajeContinuo = AprendizajeContinuo(this)
+    // lazy: en el constructor de la Activity todavía no hay Context adjunto
+    private val aprendizajeContinuo by lazy { AprendizajeContinuo(applicationContext) }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -66,10 +66,15 @@ class ActualizadorHistorico(private val context: Context) {
                 if (connection.responseCode == 200) {
                     val content = connection.inputStream.bufferedReader().readText()
                     connection.disconnect()
-                    // Solo sobrescribir si el contenido tiene sentido (cabecera CSV presente)
-                    if (content.length > 100) {
-                        File(context.filesDir, csvFile).writeText(content)
-                        exitosos++
+                    // Solo sobrescribir si el contenido es de verdad un CSV de sorteos
+                    // (antes bastaba con >100 caracteres: una página de error HTML pasaba)
+                    if (content.length > 100 && content.startsWith("fecha,")) {
+                        // Escritura atómica: primero a .tmp y luego rename, para que nadie
+                        // lea un CSV a medio escribir mientras la app está calculando
+                        val destino = File(context.filesDir, csvFile)
+                        val tmp = File(context.filesDir, "$csvFile.tmp")
+                        tmp.writeText(content)
+                        if (tmp.renameTo(destino)) exitosos++ else tmp.delete()
                     }
                 } else {
                     connection.disconnect()

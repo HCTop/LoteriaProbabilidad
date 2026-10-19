@@ -14,15 +14,22 @@ import kotlin.random.Random
  *
  * Ejecuta un bucle de mini walk-forward sobre el histórico:
  *   1. Toma un sorteo aleatorio del histórico (índice i)
- *   2. Puntúa cada voter del Ensemble usando solo history[0..i-1]
+ *   2. Puntúa cada voter del Ensemble usando SOLO los sorteos anteriores a i
  *   3. Compara con el sorteo real [i]
  *   4. Acumula 10 iteraciones y actualiza pesos del Ensemble vía MemoriaIA
+ *
+ * IMPORTANTE: los CSV vienen ordenados de MÁS RECIENTE a MÁS ANTIGUO
+ * (historico[0] = último sorteo). Por eso el "pasado" de i es subList(i + 1, size)
+ * y los sorteos "recientes" de ese pasado son take(n), no takeLast(n).
  *
  * Con 4000+ sorteos históricos disponibles, aprende sin esperar sorteos reales.
  * No usa algoritmo genético — cada voter se evalúa con reglas ligeras (~300ms/iter).
  * Se detiene automáticamente si AprendizajeService está activo (evita conflictos).
  */
-class AprendizajeContinuo(private val context: Context) {
+class AprendizajeContinuo(context: Context) {
+
+    // Siempre applicationContext: esta clase vive más que una Activity concreta
+    private val context: Context = context.applicationContext
 
     private var job: Job? = null
 
@@ -57,11 +64,13 @@ class AprendizajeContinuo(private val context: Context) {
 
             val rnd = Random(System.currentTimeMillis())
             val batch = mutableListOf<Map<MotorInteligencia.EstrategiaPrediccion, Int>>()
+            // Índice máximo evaluable: debe quedar al menos MIN_HISTORIA sorteos más antiguos
+            val maxIndice = historico.size - MIN_HISTORIA
 
             while (isActive && !AprendizajeService.isRunning) {
                 try {
-                    val i    = rnd.nextInt(MIN_HISTORIA, historico.size)
-                    val hist = historico.subList(0, i)
+                    val i    = rnd.nextInt(0, maxIndice)
+                    val hist = historico.subList(i + 1, historico.size) // solo pasado
                     val real = historico[i].numeros.toSet()
 
                     // Puntuar cada voter del Ensemble (sin algoritmo genético)
@@ -79,8 +88,9 @@ class AprendizajeContinuo(private val context: Context) {
 
                     // Cada BATCH_SIZE iteraciones, promediar y guardar pesos
                     if (batch.size >= BATCH_SIZE) {
+                        // Media en Double: con ~0.7 aciertos medios, .toInt() lo dejaba todo a 0
                         val promedios = MotorInteligencia.EstrategiaPrediccion.values()
-                            .associateWith { e -> batch.map { it[e] ?: 0 }.average().toInt() }
+                            .associateWith { e -> batch.map { it[e] ?: 0 }.average() }
                         withContext(Dispatchers.IO) {
                             memoriaIA.registrarRendimientoEstrategias(promedios, LOTERIA)
                         }
@@ -109,14 +119,14 @@ class AprendizajeContinuo(private val context: Context) {
 
     /** Top 6 por frecuencia (histórica o ventana reciente). */
     private fun top6Frec(hist: List<ResultadoPrimitiva>, ventana: Int? = null): Set<Int> {
-        val data = if (ventana != null) hist.takeLast(ventana) else hist
+        val data = if (ventana != null) hist.take(ventana) else hist
         return (1..MAX_N).sortedByDescending { n -> data.count { n in it.numeros } }.take(6).toSet()
     }
 
     /** Consenso de ventanas 5/12/30: números en top-12 de al menos 2 de 3 ventanas. */
     private fun top6Consenso(hist: List<ResultadoPrimitiva>): Set<Int> {
         val topPorVentana = listOf(5, 12, 30).map { v ->
-            val rec = hist.takeLast(v)
+            val rec = hist.take(v)
             (1..MAX_N).sortedByDescending { n -> rec.count { n in it.numeros } }.take(12).toSet()
         }
         return (1..MAX_N).sortedByDescending { n -> topPorVentana.count { n in it } }.take(6).toSet()
@@ -136,11 +146,10 @@ class AprendizajeContinuo(private val context: Context) {
                 (25..MAX_N).sortedByDescending(frec).take(3)).toSet()
     }
 
-    /** Top 6 más "debidos": mayor número de sorteos sin aparecer. */
+    /** Top 6 más "debidos": mayor número de sorteos sin aparecer (hist[0] = más reciente). */
     private fun top6Gap(hist: List<ResultadoPrimitiva>): Set<Int> {
-        val n = hist.size
         return (1..MAX_N)
-            .sortedByDescending { x -> n - 1 - hist.indexOfLast { x in it.numeros } }
+            .sortedByDescending { x -> hist.indexOfFirst { x in it.numeros }.let { if (it < 0) hist.size else it } }
             .take(6).toSet()
     }
 
