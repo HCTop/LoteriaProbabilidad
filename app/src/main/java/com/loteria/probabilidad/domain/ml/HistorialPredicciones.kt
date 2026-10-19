@@ -265,6 +265,15 @@ class HistorialPredicciones(context: Context) {
         // Mantener solo los últimos MAX_HISTORIAL
         while (historial.size > MAX_HISTORIAL) historial.removeAt(historial.lastIndex)
 
+        escribirHistorial(tipoLoteria, historial)
+    }
+
+    /** Borra del historial las entradas simuladas (las evaluaciones reales se conservan). */
+    fun borrarSimulados(tipoLoteria: String) {
+        escribirHistorial(tipoLoteria, cargarHistorialInterno(tipoLoteria).filter { !it.simulado })
+    }
+
+    private fun escribirHistorial(tipoLoteria: String, historial: List<EntradaHistorial>) {
         // Serializar y guardar
         val jsonArray = JSONArray()
         for (entrada in historial) {

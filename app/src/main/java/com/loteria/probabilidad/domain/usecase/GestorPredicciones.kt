@@ -46,6 +46,27 @@ class GestorPredicciones(
             TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA
         )
 
+        /**
+         * MIGRACIÓN DE UNA SOLA VEZ (oct-2026): al pasar de 7 a 11 métodos, se borran los sorteos
+         * simulados y las combinaciones guardadas del próximo sorteo, para que todo se rehaga
+         * con los 11 métodos. Las evaluaciones REALES se conservan. Se marca con un flag y no
+         * vuelve a ejecutarse. Para repetirla en desarrollo: subir VERSION_METODOS.
+         */
+        private const val VERSION_METODOS = 2
+
+        fun migrarSiHaceFalta(context: Context) {
+            val app = context.applicationContext
+            val prefs = app.getSharedPreferences("gestor_predicciones", Context.MODE_PRIVATE)
+            if (prefs.getInt("version_metodos", 1) >= VERSION_METODOS) return
+            val historial = HistorialPredicciones(app)
+            for (tipo in LOTERIAS_EVALUABLES) {
+                historial.borrarSimulados(tipo.name)
+                historial.eliminarPredicciones(tipo.name, historial.proximoSorteo(tipo.name).toString())
+            }
+            prefs.edit().putInt("version_metodos", VERSION_METODOS).apply()
+            android.util.Log.i("GestorPredicciones", "Migración a $VERSION_METODOS: historial simulado y predicciones rehechos")
+        }
+
         fun crear(context: Context): GestorPredicciones {
             val app = context.applicationContext
             val repository = LoteriaRepository(LoteriaLocalDataSource(app))

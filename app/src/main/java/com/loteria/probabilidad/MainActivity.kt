@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
         // del próximo sorteo aunque no se abra la app (no se duplica si ya existe)
         SincronizacionDiariaWorker.programar(applicationContext)
 
+        // Una sola vez: rehacer simulados y predicciones con los 11 métodos
+        com.loteria.probabilidad.domain.usecase.GestorPredicciones.migrarSiHaceFalta(applicationContext)
+
         // La descarga de históricos la hace ahora la pantalla de inicio (SeleccionViewModel)
         // ANTES de evaluar aciertos; aquí solo se duplicaba la descarga en paralelo.
         
