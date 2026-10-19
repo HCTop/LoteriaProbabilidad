@@ -39,6 +39,10 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
   de bolas. Se programa en `MainActivity.onCreate` con KEEP (no se duplica).
 - Historial: entradas `simulado = true` vienen del botón "Simular los últimos 10 sorteos"
   (walk-forward, sin entrenar la IA); una evaluación real sustituye a la simulada.
+- `scripts/laboratorio_primitiva.py` — laboratorio honesto: ~22 métodos en walk-forward sobre
+  todo el histórico, z-score frente al azar, Bonferroni, validación fuera de muestra y test
+  chi-cuadrado de sesgo del bombo. Para probar un método nuevo, añadirlo a `METODOS` y ejecutar.
+  Resultado actual (4.101 sorteos): ningún método se distingue del azar; bombo sin sesgo (p=0,96).
 - `scripts/actualizar_datos.py` + `.github/workflows/actualizar-historicos.yml` —
   regeneran los CSV cada noche desde lotoideas (Google Sheets).
 
