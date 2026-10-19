@@ -54,7 +54,8 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `scripts/laboratorio_perfil.py` — método "🧩 Perfil típico" (`MetodoCalculo.PERFIL_TIPICO`,
   `CalculadorProbabilidad.generarPerfilTipico`, mismo algoritmo): 1 número del último sorteo +
   5 de los 15 más calientes (50 sorteos) con forma típica obligatoria, prefiriendo números > 31.
-  Primitiva walk-forward (4.101 sorteos): media 0,758 vs 0,735, 70 premios vs 76 esperados → azar.
+  Walk-forward: Primitiva (4.101) media 0,758, 70 premios vs 76 esperados; Bonoloto (9.320) media
+  0,751, 172 premios vs 174 esperados (un 5 aciertos) → no se distingue del azar.
 - `scripts/actualizar_datos.py` + `.github/workflows/actualizar-historicos.yml` —
   regeneran los CSV cada noche desde lotoideas (Google Sheets).
 
