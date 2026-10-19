@@ -168,13 +168,14 @@ class SeleccionViewModel(
 
             // 4. Método a mostrar: el mejor del ranking histórico (con al menos 3 sorteos),
             //    si no el mejor del último sorteo, y si no Ensemble
-            val ranking = historialPredicciones.obtenerRankingMetodos(tipo.name)
-            val mejorDelRanking = if (historial.size >= 3) ranking.firstOrNull() else null
-            mejorMetodo = mejorDelRanking?.let { metodoPorNombre(it.first) }
-                ?: metodoMejor ?: MetodoCalculo.ENSEMBLE_VOTING
-
+            //    Mismo criterio y mismos sorteos (los últimos que elige el usuario en 🏆) que la
+            //    pantalla de la lotería, para que las dos enseñen la misma jugada.
             val cantidad = if (tipo == TipoLoteria.PRIMITIVA || tipo == TipoLoteria.BONOLOTO) 6 else 5
-            val promedio = ranking.firstOrNull { metodoPorNombre(it.first) == mejorMetodo }?.second ?: 0.0
+            val lider = if (historial.size >= 3)
+                historialPredicciones.metodoLider(tipo.name, if (cantidad == 6) 3 else 2) else null
+            mejorMetodo = lider?.let { metodoPorNombre(it.first) }
+                ?: metodoMejor ?: MetodoCalculo.ENSEMBLE_VOTING
+            val promedio = lider?.second ?: 0.0
             tasaAcierto = promedio * 100 / cantidad
 
             val combinacion = combinaciones.firstOrNull { nombreMetodo(it) == mejorMetodo.displayName }

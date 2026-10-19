@@ -171,7 +171,17 @@ fun PantallaResultados(
                 }
                 
                 is ResultadosUiState.Success -> {
+                    val contexto = androidx.compose.ui.platform.LocalContext.current.applicationContext
+                    val historialPrefs = remember { HistorialPredicciones(contexto) }
+                    var ventanaRanking by remember(tipoLoteria) {
+                        mutableStateOf(historialPrefs.ventanaRanking(tipoLoteria.name))
+                    }
                     ResultadosContent(
+                        ventanaRanking = ventanaRanking,
+                        onCambiarVentana = { n ->
+                            ventanaRanking = n
+                            historialPrefs.guardarVentanaRanking(tipoLoteria.name, n)
+                        },
                         analisis = uiState.analisis,
                         tipoLoteria = tipoLoteria,
                         rangoSeleccionado = rangoFechasSeleccionado,
@@ -276,6 +286,8 @@ private fun ResultadosContent(
     prediccionesInfo: String = "",
     progresoRelleno: GestorPredicciones.EstadoSimulacion? = null,
     onRellenarHistorial: (Int) -> Unit = { _ -> },
+    ventanaRanking: Int = 1000,
+    onCambiarVentana: (Int) -> Unit = {},
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
@@ -311,6 +323,9 @@ private fun ResultadosContent(
         //  1. Qué jugar en el próximo sorteo (combinación del método que más acierta)
         //  2. Qué método acierta más (con su detalle al tocar)
         if (esDeBolas) {
+            // Sorteos que cuentan para el "mejor método" (y por tanto para la Jugada):
+            // los últimos 10, 100 o 1.000, a elección del usuario en la tarjeta 🏆.
+            val historialVentana = historialEvaluado.take(ventanaRanking)
             item {
                 SemaforoBoteCard(
                     tipoLoteria = tipoLoteria,
@@ -322,14 +337,17 @@ private fun ResultadosContent(
             item {
                 JugadaRecomendadaCard(
                     combinaciones = analisis.combinacionesSugeridas,
-                    historialEvaluado = historialEvaluado,
+                    historialEvaluado = historialVentana,
                     tipoLoteria = tipoLoteria,
                     prediccionesInfo = prediccionesInfo
                 )
             }
             item {
                 EvaluacionCard(
-                    historialEvaluado = historialEvaluado,
+                    historialEvaluado = historialVentana,
+                    ventana = ventanaRanking,
+                    totalEvaluados = historialEvaluado.size,
+                    onCambiarVentana = onCambiarVentana,
                     tipoLoteria = tipoLoteria,
                     prediccionesInfo = prediccionesInfo,
                     progresoRelleno = progresoRelleno,
@@ -1045,9 +1063,13 @@ private fun JugadaRecomendadaCard(
  * Al tocarla se abre el detalle (estadísticas + sorteos con sus aciertos)
  * y desde ahí se puede ver cualquier otro método.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EvaluacionCard(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
+    ventana: Int,
+    totalEvaluados: Int,
+    onCambiarVentana: (Int) -> Unit,
     tipoLoteria: TipoLoteria,
     prediccionesInfo: String,
     progresoRelleno: GestorPredicciones.EstadoSimulacion?,
@@ -1090,6 +1112,28 @@ private fun EvaluacionCard(
                     Icon(Icons.Default.ExpandMore, contentDescription = "Ver detalle")
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                // Qué sorteos cuentan: el mejor método (y la Jugada) se decide con estos
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Últimos", style = MaterialTheme.typography.labelMedium)
+                    listOf(10, 100, 1000).forEach { n ->
+                        FilterChip(
+                            selected = ventana == n,
+                            onClick = { onCambiarVentana(n) },
+                            label = { Text(if (n == 1000) "1.000" else "$n") }
+                        )
+                    }
+                }
+                if (totalEvaluados < ventana) {
+                    Text(
+                        "De momento hay $totalEvaluados sorteos analizados.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     DatoMetodo("Premios", "${mejor.premios}", if (mejor.premios > 0) verde else null)
                     DatoMetodo("Máximo", "${mejor.maximo}")

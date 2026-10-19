@@ -404,6 +404,31 @@ class HistorialPredicciones(context: Context) {
      * Obtiene un ranking completo de todos los métodos por rendimiento histórico.
      * @return Lista de (nombre método, promedio aciertos, mejor acierto) ordenado de mejor a peor.
      */
+    /** Cuántos sorteos recientes cuentan para elegir el mejor método (lo elige el usuario en 🏆). */
+    fun ventanaRanking(tipoLoteria: String): Int = prefs.getInt("ventana_ranking_$tipoLoteria", 1000)
+
+    fun guardarVentanaRanking(tipoLoteria: String, sorteos: Int) {
+        prefs.edit().putInt("ventana_ranking_$tipoLoteria", sorteos).apply()
+    }
+
+    /**
+     * Método que más acierta en los últimos [ventanaRanking] sorteos del historial.
+     * MISMO criterio que la tarjeta 🏆: más premios (≥ [minPremio] aciertos), luego mayor
+     * máximo, luego mejor media. Devuelve (método, media) o null si no hay historial.
+     */
+    fun metodoLider(tipoLoteria: String, minPremio: Int): Pair<String, Double>? {
+        val historial = cargarHistorial(tipoLoteria).take(ventanaRanking(tipoLoteria))
+        val aciertos = mutableMapOf<String, MutableList<Int>>()
+        for (entrada in historial) for (eval in entrada.evaluaciones) {
+            aciertos.getOrPut(eval.metodo) { mutableListOf() }.add(eval.aciertosNumeros)
+        }
+        return aciertos.entries.sortedWith(
+            compareByDescending<Map.Entry<String, MutableList<Int>>> { e -> e.value.count { it >= minPremio } }
+                .thenByDescending { e -> e.value.max() }
+                .thenByDescending { e -> e.value.average() }
+        ).firstOrNull()?.let { it.key to it.value.average() }
+    }
+
     fun obtenerRankingMetodos(tipoLoteria: String): List<Triple<String, Double, Int>> {
         val historial = cargarHistorial(tipoLoteria)
         if (historial.isEmpty()) return emptyList()
