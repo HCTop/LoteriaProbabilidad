@@ -37,20 +37,23 @@ class GestorPredicciones(
 
     data class Resultado(val analisis: AnalisisProbabilidad, val info: String)
 
+    // ── Simulación de sorteos pasados (puede durar minutos) ──
+    /** Lotería, sorteos hechos, total y cuándo empezó (para calcular lo que falta).
+     *  Nested en la clase (no en companion): así se referencia como
+     *  GestorPredicciones.EstadoSimulacion desde fuera. */
+    data class EstadoSimulacion(val tipo: TipoLoteria, val hechos: Int, val total: Int, val inicioMs: Long) {
+        /** Segundos que faltan aprox., o null si aún no hay base para calcularlo. */
+        fun segundosRestantes(): Long? {
+            if (hechos < 3) return null
+            val porSorteo = (System.currentTimeMillis() - inicioMs) / hechos
+            return porSorteo * (total - hechos) / 1000
+        }
+    }
+
     companion object {
         private val candados = java.util.concurrent.ConcurrentHashMap<TipoLoteria, Any>()
         private fun candado(tipo: TipoLoteria): Any = candados.getOrPut(tipo) { Any() }
 
-        // ── Simulación de sorteos pasados (puede durar minutos) ──
-        /** Lotería, sorteos hechos, total y cuándo empezó (para calcular lo que falta). */
-        data class EstadoSimulacion(val tipo: TipoLoteria, val hechos: Int, val total: Int, val inicioMs: Long) {
-            /** Segundos que faltan aprox., o null si aún no hay base para calcularlo. */
-            fun segundosRestantes(): Long? {
-                if (hechos < 3) return null
-                val porSorteo = (System.currentTimeMillis() - inicioMs) / hechos
-                return porSorteo * (total - hechos) / 1000
-            }
-        }
         private val _simulacion = kotlinx.coroutines.flow.MutableStateFlow<EstadoSimulacion?>(null)
         /** Simulación en marcha (o null). La pantalla lo observa aunque se haya cerrado y vuelto a abrir. */
         val simulacion: kotlinx.coroutines.flow.StateFlow<EstadoSimulacion?> = _simulacion
