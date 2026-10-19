@@ -153,12 +153,26 @@ enum class MetodoCalculo(
                 "Matemáticamente, tan válido como cualquier otro método.",
         explicacionCorta = "Selección totalmente al azar"
     ),
+    CALIENTES_50(
+        displayName = "🌡️ Calientes 50",
+        descripcion = "Los números que más han salido en los últimos 50 sorteos. " +
+                "Fue el que más premios dio en La Primitiva en el laboratorio (sobre todo " +
+                "desde 2018), aunque no de forma estadísticamente significativa: se mide aquí " +
+                "hacia delante para ver si se mantiene.",
+        explicacionCorta = "Los más salidos en los últimos 50 sorteos"
+    ),
+    DEBIDOS(
+        displayName = "⏳ Debidos",
+        descripcion = "Los números que más sorteos llevan sin salir ('les toca'). " +
+                "Es la creencia contraria a Calientes; útil para comparar.",
+        explicacionCorta = "Los que más tiempo llevan sin salir"
+    ),
     MULTI_HORIZON(
         displayName = "🔭 Multi-Horizon",
         descripcion = "Consenso multi-horizonte: analiza frecuencias en 4 ventanas temporales " +
                 "(5, 12, 30 y 60 sorteos). Selecciona números que aparecen consistentemente " +
-                "en el top de TODAS las ventanas. Método #1 en backtest con 0.771 hits/sorteo " +
-                "sobre 2000 sorteos (vs 0.735 teórico random).",
+                "en el top de TODAS las ventanas. (En el laboratorio con todo el histórico " +
+                "no se distingue del azar: ver scripts/laboratorio_*.py.)",
         explicacionCorta = "Top en 4 ventanas temporales → consenso multi-horizonte"
     ),
     METODO_ABUELO(

@@ -206,6 +206,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 val combinaciones = (0 until numCombinaciones).map {
                     motorIA.generarCombinacionMultiHorizon(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
@@ -320,6 +322,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map {
                     motorIA.generarCombinacionMultiHorizon(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
@@ -441,6 +445,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map {
                     motorIA.generarCombinacionMultiHorizon(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
@@ -894,6 +900,65 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
 
     /**
+     * CALIENTES 50: los números que más han salido en los últimos [ventana] sorteos.
+     * [historico] va del más reciente al más antiguo (take = recientes).
+     * Empates: gana el más frecuente en todo el histórico y luego el número menor
+     * (determinista: el mismo histórico da siempre la misma combinación).
+     */
+    private fun generarCalientes(
+        historico: List<List<Int>>,
+        maxNumero: Int,
+        cantidad: Int,
+        numCombinaciones: Int,
+        ventana: Int = 50
+    ): List<CombinacionSugerida> {
+        val recientes = historico.take(ventana)
+        val frecReciente = contarFrecuencias(recientes.flatten(), 1..maxNumero)
+        val frecTotal = contarFrecuencias(historico.flatten(), 1..maxNumero)
+        val ordenados = (1..maxNumero).sortedWith(
+            compareByDescending<Int> { frecReciente[it] ?: 0 }
+                .thenByDescending { frecTotal[it] ?: 0 }
+                .thenBy { it }
+        )
+        return (0 until numCombinaciones).map { index ->
+            val nums = ordenados.drop(index * 2).take(cantidad).sorted()
+            val veces = nums.sumOf { frecReciente[it] ?: 0 }
+            CombinacionSugerida(
+                numeros = nums,
+                probabilidadRelativa = 50.0,
+                explicacion = "Los más salidos en los últimos ${recientes.size} sorteos ($veces apariciones entre los ${nums.size})"
+            )
+        }
+    }
+
+    /**
+     * DEBIDOS: los números que más sorteos llevan sin salir.
+     * [historico] va del más reciente al más antiguo: el hueco de n es el índice del primer sorteo con n.
+     */
+    private fun generarDebidos(
+        historico: List<List<Int>>,
+        maxNumero: Int,
+        cantidad: Int,
+        numCombinaciones: Int
+    ): List<CombinacionSugerida> {
+        val hueco = (1..maxNumero).associateWith { n ->
+            historico.indexOfFirst { n in it }.let { if (it < 0) historico.size else it }
+        }
+        val ordenados = (1..maxNumero).sortedWith(
+            compareByDescending<Int> { hueco[it] ?: 0 }.thenBy { it }
+        )
+        return (0 until numCombinaciones).map { index ->
+            val nums = ordenados.drop(index * 2).take(cantidad).sorted()
+            CombinacionSugerida(
+                numeros = nums,
+                probabilidadRelativa = 50.0,
+                explicacion = "Los que más llevan sin salir: " +
+                    nums.joinToString(", ") { "$it (${hueco[it]} sorteos)" }
+            )
+        }
+    }
+
+    /**
      * ALEATORIO PURO: Completamente al azar.
      */
     private fun generarAleatorio(maxNumero: Int, cantidad: Int, numCombinaciones: Int): List<CombinacionSugerida> {
@@ -1172,6 +1237,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.RACHAS_MIX -> {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
             }
+            MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones).map { it.numeros }
+            MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones).map { it.numeros }
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMultiHorizon(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
             }
@@ -1548,7 +1615,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 // Completamente aleatorio
                 (0..99).shuffled(rnd).take(10)
             }
-            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO -> {
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO,
+            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
@@ -1686,7 +1754,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.ALEATORIO_PURO -> {
                 (0..99).shuffled(rnd).take(10)
             }
-            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO -> {
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO,
+            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }

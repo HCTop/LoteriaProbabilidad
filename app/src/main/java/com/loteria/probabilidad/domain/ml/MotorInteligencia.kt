@@ -404,7 +404,9 @@ class MotorInteligencia(private val context: Context? = null) {
                 MetodoCalculo.IA_GENETICA -> EstrategiaPrediccion.GENETICO
                 MetodoCalculo.ALTA_CONFIANZA -> EstrategiaPrediccion.ALTA_CONFIANZA
                 MetodoCalculo.RACHAS_MIX -> EstrategiaPrediccion.RACHAS_MIX
-                MetodoCalculo.ENSEMBLE_VOTING -> EstrategiaPrediccion.GENETICO
+                MetodoCalculo.CALIENTES_50 -> EstrategiaPrediccion.TENDENCIA
+                MetodoCalculo.DEBIDOS -> EstrategiaPrediccion.CICLOS
+                // Ensemble = votación de todas; no es una estrategia (antes pisaba al Genético)
                 else -> null
             }
             if (estrategia != null) {

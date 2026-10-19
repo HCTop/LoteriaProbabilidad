@@ -24,9 +24,13 @@ class ObtenerCombinacionesUseCase(
         MetodoCalculo.ALTA_CONFIANZA,
         MetodoCalculo.IA_GENETICA,
         MetodoCalculo.RACHAS_MIX,
-        MetodoCalculo.FRECUENCIAS
-        // NUMEROS_FRIOS y ALEATORIO_PURO eliminados: backtest demostró que
-        // no superan el valor esperado teórico (0.735 ac/sorteo) — ruido puro
+        MetodoCalculo.FRECUENCIAS,
+        MetodoCalculo.CALIENTES_50,
+        MetodoCalculo.DEBIDOS,
+        MetodoCalculo.NUMEROS_FRIOS,
+        // Aleatorio = control honesto: si un método no le gana a la larga, no aporta nada.
+        // (Antes se quitaron Fríos y Aleatorio "por no superar 0,735", pero ninguno lo supera.)
+        MetodoCalculo.ALEATORIO_PURO
     )
 
     /**

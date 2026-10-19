@@ -329,14 +329,18 @@ class GestorPredicciones(
      */
     private fun mapearMetodoAEstrategia(metodo: String): MotorInteligencia.EstrategiaPrediccion? {
         return when {
-            metodo.contains("Ensemble") || metodo.contains("🗳️") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
+            // El Ensemble es la votación de todas: no es una estrategia en sí (antes sumaba al Genético)
+            metodo.contains("Ensemble") || metodo.contains("🗳️") -> null
+            metodo.contains("Calientes") -> MotorInteligencia.EstrategiaPrediccion.TENDENCIA
+            metodo.contains("Debidos") -> MotorInteligencia.EstrategiaPrediccion.CICLOS
             metodo.contains("Alta Confianza") || metodo.contains("🎯") -> MotorInteligencia.EstrategiaPrediccion.ALTA_CONFIANZA
             metodo.contains("Rachas") || metodo.contains("🔥") -> MotorInteligencia.EstrategiaPrediccion.RACHAS_MIX
             metodo.contains("AG") || metodo.contains("🧬") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
             metodo.contains("IA") || metodo.contains("🤖") -> MotorInteligencia.EstrategiaPrediccion.GENETICO
             metodo.contains("Frecuencias") || metodo.contains("Análisis") -> MotorInteligencia.EstrategiaPrediccion.FRECUENCIA
             metodo.contains("Fríos") -> MotorInteligencia.EstrategiaPrediccion.EQUILIBRIO
-            metodo.contains("Aleatorio") -> MotorInteligencia.EstrategiaPrediccion.TENDENCIA
+            // El aleatorio es el control: no debe mover pesos (antes sumaba a Tendencia)
+            metodo.contains("Aleatorio") -> null
             metodo.contains("Abuelo") || metodo.contains("🔮") -> null // El Abuelo tiene su propio sistema
             else -> null
         }
