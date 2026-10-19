@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.loteria.probabilidad.data.datasource.BoteOficial
 import com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.data.repository.LoteriaRepository
@@ -38,7 +39,8 @@ class ResultadosViewModel(
     private val motorIA: MotorInteligencia,
     private val historialPredicciones: HistorialPredicciones,
     private val memoriaIA: MemoriaIA,
-    private val gestorPredicciones: GestorPredicciones
+    private val gestorPredicciones: GestorPredicciones,
+    private val boteOficial: BoteOficial
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ResultadosUiState>(ResultadosUiState.Loading)
@@ -89,6 +91,10 @@ class ResultadosViewModel(
     private val _boteActual = MutableStateFlow(0.0)
     val boteActual: StateFlow<Double> = _boteActual.asStateFlow()
 
+    // De dónde sale el bote mostrado ("" = lo escribe el usuario)
+    private val _boteFuente = MutableStateFlow("")
+    val boteFuente: StateFlow<String> = _boteFuente.asStateFlow()
+
     private val _formulaAbueloCargando = MutableStateFlow(false)
     val formulaAbueloCargando: StateFlow<Boolean> = _formulaAbueloCargando.asStateFlow()
 
@@ -136,6 +142,9 @@ class ResultadosViewModel(
 
                     // Limpiar predicciones muy antiguas
                     historialPredicciones.limpiarPrediccionesAntiguas(tipoLoteria.name)
+
+                    // ═══ PASO 6: Bote oficial del próximo sorteo (Loterías y Apuestas) ═══
+                    cargarBoteOficial(tipoLoteria)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("ResultadosVM", "Error cargando datos: ${e.message}", e)
@@ -356,7 +365,25 @@ class ResultadosViewModel(
 
     // ==================== FÓRMULA DEL ABUELO ====================
 
+    /** Rellena el bote con el dato oficial, salvo que el usuario ya haya escrito uno. */
+    private suspend fun cargarBoteOficial(tipo: TipoLoteria) {
+        try {
+            val bote = boteOficial.obtener(tipo) ?: return
+            if (_boteActual.value <= 0.0) {
+                _boteActual.value = bote.importe
+                val fecha = try {
+                    java.time.LocalDate.parse(bote.fechaSorteo)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM"))
+                } catch (e: Exception) { bote.fechaSorteo }
+                _boteFuente.value = "Bote oficial del sorteo del $fecha (Loterías y Apuestas del Estado)"
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ResultadosVM", "Bote oficial no disponible: ${e.message}")
+        }
+    }
+
     fun actualizarBote(bote: Double) {
+        if (bote != _boteActual.value) _boteFuente.value = ""   // ahora lo ha escrito el usuario
         _boteActual.value = bote
     }
 
@@ -509,7 +536,9 @@ class ResultadosViewModel(
             val memoriaIA = MemoriaIA(context)
 
             val gestor = GestorPredicciones(repository, useCase, historialPredicciones, memoriaIA)
-            return ResultadosViewModel(useCase, repository, motorIA, historialPredicciones, memoriaIA, gestor) as T
+            return ResultadosViewModel(
+                useCase, repository, motorIA, historialPredicciones, memoriaIA, gestor, BoteOficial(context)
+            ) as T
         }
     }
 }

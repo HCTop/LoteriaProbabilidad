@@ -79,6 +79,7 @@ fun PantallaResultados(
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
+    boteFuente: String = "",
     formulaAbueloCargando: Boolean = false,
     onBoteChange: (Double) -> Unit = {},
     onCalcularFormula: () -> Unit = {},
@@ -180,6 +181,7 @@ fun PantallaResultados(
                         onRellenarHistorial = onRellenarHistorial,
                         formulaAbuelo = formulaAbuelo,
                         boteActual = boteActual,
+                        boteFuente = boteFuente,
                         formulaAbueloCargando = formulaAbueloCargando,
                         onBoteChange = onBoteChange,
                         onCalcularFormula = onCalcularFormula
@@ -268,6 +270,7 @@ private fun ResultadosContent(
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
+    boteFuente: String = "",
     formulaAbueloCargando: Boolean = false,
     onBoteChange: (Double) -> Unit = {},
     onCalcularFormula: () -> Unit = {},
@@ -398,6 +401,7 @@ private fun ResultadosContent(
                 tipoLoteria = tipoLoteria,
                 formulaAbuelo = formulaAbuelo,
                 boteActual = boteActual,
+                boteFuente = boteFuente,
                 cargando = formulaAbueloCargando,
                 onBoteChange = onBoteChange,
                 onCalcular = onCalcularFormula
@@ -1031,13 +1035,15 @@ private fun FormulaAbueloCard(
     tipoLoteria: TipoLoteria,
     formulaAbuelo: ResultadoFormulaAbuelo?,
     boteActual: Double,
+    boteFuente: String = "",
     cargando: Boolean,
     onBoteChange: (Double) -> Unit,
     onCalcular: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expandido by remember { mutableStateOf(false) }
-    var boteTexto by remember { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
+    // Clave boteActual: si llega el bote oficial después de pintar la tarjeta, el campo se actualiza
+    var boteTexto by remember(boteActual) { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
 
     // Calcular Kelly rápido para el semáforo (sin necesidad de calcular cobertura)
     val kellyRapido = remember(tipoLoteria, boteActual) {
@@ -1093,6 +1099,17 @@ private fun FormulaAbueloCard(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (boteFuente.isNotBlank()) {
+                        Text(
+                            text = "✓ $boteFuente",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(8.dp))
 

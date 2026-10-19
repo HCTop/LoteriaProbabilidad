@@ -117,6 +117,7 @@ fun LoteriaProbabilidadApp(
             // Fórmula del Abuelo
             val formulaAbuelo by viewModel.formulaAbuelo.collectAsState()
             val boteActual by viewModel.boteActual.collectAsState()
+            val boteFuente by viewModel.boteFuente.collectAsState()
             val formulaAbueloCargando by viewModel.formulaAbueloCargando.collectAsState()
 
             PantallaResultados(
@@ -141,6 +142,7 @@ fun LoteriaProbabilidadApp(
                 onRellenarHistorial = { viewModel.rellenarHistorial() },
                 formulaAbuelo = formulaAbuelo,
                 boteActual = boteActual,
+                boteFuente = boteFuente,
                 formulaAbueloCargando = formulaAbueloCargando,
                 onBoteChange = { viewModel.actualizarBote(it) },
                 onCalcularFormula = { viewModel.ejecutarFormulaAbuelo() }
