@@ -77,7 +77,7 @@ fun PantallaResultados(
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
     progresoRelleno: Pair<Int, Int>? = null,
-    onRellenarHistorial: () -> Unit = {},
+    onRellenarHistorial: (Int) -> Unit = { _ -> },
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
@@ -274,7 +274,7 @@ private fun ResultadosContent(
     rankingMetodos: List<Triple<String, Double, Int>> = emptyList(),
     prediccionesInfo: String = "",
     progresoRelleno: Pair<Int, Int>? = null,
-    onRellenarHistorial: () -> Unit = {},
+    onRellenarHistorial: (Int) -> Unit = { _ -> },
     // Fórmula del Abuelo
     formulaAbuelo: ResultadoFormulaAbuelo? = null,
     boteActual: Double = 0.0,
@@ -1050,7 +1050,7 @@ private fun EvaluacionCard(
     tipoLoteria: TipoLoteria,
     prediccionesInfo: String,
     progresoRelleno: Pair<Int, Int>?,
-    onRellenarHistorial: () -> Unit,
+    onRellenarHistorial: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val minPremio = if (tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO) 3 else 2
@@ -1134,17 +1134,35 @@ private fun DatoMetodo(etiqueta: String, valor: String, color: Color? = null) {
 }
 
 @Composable
-private fun BotonSimular(progresoRelleno: Pair<Int, Int>?, onRellenarHistorial: () -> Unit) {
+private fun BotonSimular(progresoRelleno: Pair<Int, Int>?, onRellenarHistorial: (Int) -> Unit) {
     if (progresoRelleno != null) {
         val (hechos, total) = progresoRelleno
-        Text("Simulando sorteos pasados… $hechos/$total", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Simulando sorteos pasados… $hechos/$total" + if (total > 10) " (tarda unos minutos)" else "",
+            style = MaterialTheme.typography.bodySmall
+        )
         LinearProgressIndicator(
             progress = { if (total > 0) hechos.toFloat() / total else 0f },
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
         )
     } else {
-        OutlinedButton(onClick = onRellenarHistorial, modifier = Modifier.fillMaxWidth()) {
-            Text("🧪 Simular los últimos 10 sorteos")
+        Text(
+            "🧪 Simular los últimos sorteos",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "Cada sorteo se predice solo con los anteriores. 100 tarda unos minutos.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            listOf(10, 50, 100).forEach { n ->
+                OutlinedButton(onClick = { onRellenarHistorial(n) }, modifier = Modifier.weight(1f)) {
+                    Text("$n")
+                }
+            }
         }
     }
 }
@@ -1158,7 +1176,7 @@ private fun DetalleMetodoDialog(
     minPremio: Int,
     prediccionesInfo: String,
     progresoRelleno: Pair<Int, Int>?,
-    onRellenarHistorial: () -> Unit,
+    onRellenarHistorial: (Int) -> Unit,
     onCambiarMetodo: (String) -> Unit,
     onCerrar: () -> Unit
 ) {

@@ -129,7 +129,12 @@ class GestorPredicciones(
         var anadidos = 0
         sorteos.forEachIndexed { i, (fecha, numeros, complementarios) ->
             progreso(i, sorteos.size)
-            if (historialPredicciones.tieneEntradaHistorial(tipoLoteria.name, fecha)) return@forEachIndexed
+            // Reales: nunca se tocan. Simulados: se rehacen solo si les falta algún método
+            // (p. ej. uno añadido después, como 🧩 Perfil típico).
+            val existente = historialPredicciones.entradaHistorial(tipoLoteria.name, fecha)
+            val incompleta = existente != null && existente.simulado &&
+                !existente.evaluaciones.map { it.metodo }.containsAll(obtenerCombinacionesUseCase.nombresMetodos)
+            if (existente != null && !incompleta) return@forEachIndexed
             try {
                 val hasta = java.time.LocalDate.parse(fecha).minusDays(1).toString()
                 val analisis = obtenerCombinacionesUseCase.ejecutarTodosMetodos(
@@ -139,7 +144,9 @@ class GestorPredicciones(
                 val evaluaciones = historialPredicciones.calcularEvaluaciones(
                     analisis.combinacionesSugeridas, numeros, complementarios
                 )
-                historialPredicciones.guardarEvaluacionSimulada(tipoLoteria.name, fecha, evaluaciones)
+                historialPredicciones.guardarEvaluacionSimulada(
+                    tipoLoteria.name, fecha, evaluaciones, reemplazarSimulada = incompleta
+                )
                 anadidos++
             } catch (e: Exception) {
                 android.util.Log.e("GestorPredicciones", "Simulación $fecha falló: ${e.message}", e)

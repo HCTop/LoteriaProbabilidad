@@ -140,7 +140,7 @@ fun LoteriaProbabilidadApp(
                 rankingMetodos = rankingMetodos,
                 prediccionesInfo = prediccionesInfo,
                 progresoRelleno = progresoRelleno,
-                onRellenarHistorial = { viewModel.rellenarHistorial() },
+                onRellenarHistorial = { cuantos -> viewModel.rellenarHistorial(cuantos) },
                 formulaAbuelo = formulaAbuelo,
                 boteActual = boteActual,
                 boteFuente = boteFuente,

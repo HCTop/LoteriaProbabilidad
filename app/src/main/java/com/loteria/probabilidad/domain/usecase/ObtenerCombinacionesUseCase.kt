@@ -17,6 +17,9 @@ class ObtenerCombinacionesUseCase(
     /**
      * Orden de métodos del más elaborado al menos elaborado.
      */
+    /** Nombres de los métodos que se generan en cada sorteo (para saber si a un simulado le falta alguno). */
+    val nombresMetodos: List<String> get() = metodosOrdenados.map { it.displayName }
+
     private val metodosOrdenados = listOf(
         MetodoCalculo.METODO_ABUELO,
         MetodoCalculo.MULTI_HORIZON,

@@ -30,7 +30,8 @@ class HistorialPredicciones(context: Context) {
     )
 
     companion object {
-        private const val MAX_HISTORIAL = 60
+        /** 100 simulados (botón "Simular") + margen para los reales. */
+        private const val MAX_HISTORIAL = 120
 
         private val DIAS_SORTEO = mapOf(
             "PRIMITIVA" to listOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY),
@@ -219,8 +220,13 @@ class HistorialPredicciones(context: Context) {
     fun guardarEvaluacionSimulada(
         tipoLoteria: String,
         fechaSorteo: String,
-        evaluaciones: List<ResultadoEvaluacion>
-    ) = guardarEvaluacion(tipoLoteria, fechaSorteo, evaluaciones, simulado = true)
+        evaluaciones: List<ResultadoEvaluacion>,
+        reemplazarSimulada: Boolean = false
+    ) = guardarEvaluacion(tipoLoteria, fechaSorteo, evaluaciones, simulado = true, reemplazarSimulada = reemplazarSimulada)
+
+    /** Entrada del historial (real o simulada) de ese sorteo, o null. */
+    fun entradaHistorial(tipoLoteria: String, fechaSorteo: String): EntradaHistorial? =
+        cargarHistorialInterno(tipoLoteria).firstOrNull { it.fechaSorteo == fechaSorteo }
 
     /** ¿Hay ya una entrada (real o simulada) para ese sorteo? */
     fun tieneEntradaHistorial(tipoLoteria: String, fechaSorteo: String): Boolean =
@@ -240,14 +246,17 @@ class HistorialPredicciones(context: Context) {
         tipoLoteria: String,
         fechaSorteo: String,
         evaluaciones: List<ResultadoEvaluacion>,
-        simulado: Boolean = false
+        simulado: Boolean = false,
+        reemplazarSimulada: Boolean = false
     ) {
         val historial = cargarHistorialInterno(tipoLoteria).toMutableList()
 
-        // No duplicar. Una evaluación REAL sí sustituye a una simulada del mismo sorteo.
+        // No duplicar. Una evaluación REAL sí sustituye a una simulada del mismo sorteo,
+        // y una simulada solo sustituye a otra simulada si se pide (le faltaban métodos).
+        // Una real nunca se sustituye.
         val existente = historial.firstOrNull { it.fechaSorteo == fechaSorteo }
         if (existente != null) {
-            if (simulado || !existente.simulado) return
+            if (!existente.simulado || (simulado && !reemplazarSimulada)) return
             historial.remove(existente)
         }
 
