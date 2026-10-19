@@ -59,6 +59,12 @@ class GestorPredicciones(
         private val ambitoSimulacion = kotlinx.coroutines.CoroutineScope(
             kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
         )
+        /**
+         * Sorteos pasados que se simulan (solo la 1ª vez, en segundo plano) para decidir qué
+         * método acierta más. Con menos, el "mejor método" es pura suerte.
+         */
+        const val OBJETIVO_SIMULACION = 1000
+
         /** Para la simulación en curso; lo ya simulado se queda guardado. */
         fun pararSimulacion() = parar.set(true)
 
@@ -142,10 +148,11 @@ class GestorPredicciones(
      */
     fun rellenarHistorialSimulado(
         tipoLoteria: TipoLoteria,
-        cuantos: Int = 100,
+        cuantos: Int = OBJETIVO_SIMULACION,
+        limiteMs: Long = Long.MAX_VALUE,
         progreso: (Int, Int) -> Unit = { _, _ -> }
-    ): Int {
-        if (tipoLoteria !in LOTERIAS_EVALUABLES) return 0
+    ): Boolean {
+        if (tipoLoteria !in LOTERIAS_EVALUABLES) return true
         // (fecha, números, complementarios) del más antiguo al más reciente
         val sorteos = synchronized(candado(tipoLoteria)) { sorteosRecientes(tipoLoteria, cuantos) }.reversed()
         // Qué hay ya guardado (se lee una vez): reales → no se tocan; simulados completos → se saltan
@@ -153,6 +160,7 @@ class GestorPredicciones(
         val nombres = obtenerCombinacionesUseCase.nombresMetodos
         val tanda = mutableListOf<Triple<String, List<HistorialPredicciones.ResultadoEvaluacion>, Boolean>>()
         var anadidos = 0
+        var completo = true
 
         fun guardarTanda() {
             if (tanda.isEmpty()) return
@@ -164,7 +172,8 @@ class GestorPredicciones(
         }
 
         for ((i, sorteo) in sorteos.withIndex()) {
-            if (parar.get()) break
+            // Parar a petición o al agotar el tiempo (lo hecho queda guardado; se sigue otro día)
+            if (parar.get() || System.currentTimeMillis() > limiteMs) { completo = false; break }
             progreso(i, sorteos.size)
             val (fecha, numeros, complementarios) = sorteo
             val existente = existentes[fecha]
@@ -191,8 +200,27 @@ class GestorPredicciones(
             }
         }
         guardarTanda()
-        progreso(sorteos.size, sorteos.size)
-        return anadidos
+        if (completo) progreso(sorteos.size, sorteos.size)
+        android.util.Log.i("GestorPredicciones", "Simulación $tipoLoteria: $anadidos nuevos, completa=$completo")
+        return completo
+    }
+
+    /**
+     * Simula hasta [limiteMs] (o hasta acabar) mostrando el progreso en [simulacion].
+     * La usa SimulacionHistoricaWorker. Devuelve true si ya están simulados los [cuantos].
+     */
+    fun simularConLimite(tipoLoteria: TipoLoteria, cuantos: Int, limiteMs: Long): Boolean {
+        if (!enMarcha.compareAndSet(false, true)) return false
+        parar.set(false)
+        val inicio = System.currentTimeMillis()
+        return try {
+            rellenarHistorialSimulado(tipoLoteria, cuantos, limiteMs) { hechos, total ->
+                _simulacion.value = EstadoSimulacion(tipoLoteria, hechos, total, inicio)
+            }
+        } finally {
+            _simulacion.value = null
+            enMarcha.set(false)
+        }
     }
 
     /**
@@ -206,7 +234,7 @@ class GestorPredicciones(
         _simulacion.value = EstadoSimulacion(tipoLoteria, 0, cuantos, inicio)
         ambitoSimulacion.launch {
             try {
-                rellenarHistorialSimulado(tipoLoteria, cuantos) { hechos, total ->
+                rellenarHistorialSimulado(tipoLoteria, cuantos, Long.MAX_VALUE) { hechos, total ->
                     _simulacion.value = EstadoSimulacion(tipoLoteria, hechos, total, inicio)
                 }
             } catch (e: Exception) {

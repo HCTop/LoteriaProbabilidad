@@ -55,6 +55,11 @@ class MainActivity : ComponentActivity() {
         // Una sola vez: rehacer simulados y predicciones con los 11 métodos
         com.loteria.probabilidad.domain.usecase.GestorPredicciones.migrarSiHaceFalta(applicationContext)
 
+        // Analizar en segundo plano los últimos 1.000 sorteos de cada lotería (solo la 1ª vez es
+        // largo; luego solo comprueba). De ahí sale el método que más acierta y su jugada.
+        // Va DESPUÉS de la migración, que puede borrar simulados antiguos.
+        com.loteria.probabilidad.service.SimulacionHistoricaWorker.programar(applicationContext)
+
         // La descarga de históricos la hace ahora la pantalla de inicio (SeleccionViewModel)
         // ANTES de evaluar aciertos; aquí solo se duplicaba la descarga en paralelo.
         

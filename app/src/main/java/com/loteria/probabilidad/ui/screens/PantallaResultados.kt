@@ -1070,8 +1070,8 @@ private fun EvaluacionCard(
                 Text("🏆 Método que más acierta", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Aún no hay sorteos evaluados. Las combinaciones se guardan antes de cada sorteo " +
-                        "y se comparan con el resultado cuando sale.",
+                    "La app está analizando los últimos 1.000 sorteos para saber qué método acierta " +
+                        "más. Solo la primera vez tarda un rato; no hace falta hacer nada.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1102,6 +1102,10 @@ private fun EvaluacionCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+                if (progresoRelleno != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    BotonSimular(progresoRelleno, onRellenarHistorial)
+                }
             }
         }
     }
@@ -1135,51 +1139,34 @@ private fun DatoMetodo(etiqueta: String, valor: String, color: Color? = null) {
 }
 
 @Composable
-private fun BotonSimular(progresoRelleno: GestorPredicciones.EstadoSimulacion?, onRellenarHistorial: (Int) -> Unit) {
-    if (progresoRelleno != null) {
-        val hechos = progresoRelleno.hechos
-        val total = progresoRelleno.total
-        val faltan = progresoRelleno.segundosRestantes()
-        Text(
-            "Simulando sorteos pasados… $hechos/$total" + when {
-                faltan == null -> ""
-                faltan < 60 -> " · menos de 1 min"
-                else -> " · quedan unos ${faltan / 60} min"
-            },
-            style = MaterialTheme.typography.bodySmall
-        )
-        LinearProgressIndicator(
-            progress = { if (total > 0) hechos.toFloat() / total else 0f },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-        )
-        Text(
-            "Puedes salir de la pantalla: sigue en segundo plano y lo simulado se va guardando.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-        TextButton(onClick = { GestorPredicciones.pararSimulacion() }) { Text("Parar") }
-    } else {
-        Text(
-            "🧪 Simular los últimos sorteos",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            "Cada sorteo se predice solo con los anteriores. Cuantos más, más fiable el ranking; " +
-                "los ya simulados no se repiten.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(100, 500, 1000).forEach { n ->
-                OutlinedButton(onClick = { onRellenarHistorial(n) }, modifier = Modifier.weight(1f)) {
-                    Text(if (n == 1000) "1.000" else "$n")
-                }
-            }
-        }
-    }
+private fun BotonSimular(
+    progresoRelleno: GestorPredicciones.EstadoSimulacion?,
+    @Suppress("UNUSED_PARAMETER") onRellenarHistorial: (Int) -> Unit
+) {
+    // Ya no hay botón: la simulación de los últimos 1.000 sorteos la hace sola la app en
+    // segundo plano (SimulacionHistoricaWorker). Aquí solo se enseña el progreso si está en marcha.
+    if (progresoRelleno == null) return
+    val hechos = progresoRelleno.hechos
+    val total = progresoRelleno.total
+    val faltan = progresoRelleno.segundosRestantes()
+    Text(
+        "🔄 Analizando sorteos pasados para elegir el mejor método… $hechos/$total" + when {
+            faltan == null -> ""
+            faltan < 60 -> " · menos de 1 min"
+            else -> " · unos ${faltan / 60} min"
+        },
+        style = MaterialTheme.typography.bodySmall
+    )
+    LinearProgressIndicator(
+        progress = { if (total > 0) hechos.toFloat() / total else 0f },
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+    )
+    Text(
+        "Solo la primera vez. Puedes cerrar la app: sigue por partes y el ranking se va actualizando.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp)
+    )
 }
 
 /** Pantalla completa con el detalle de un método. */
