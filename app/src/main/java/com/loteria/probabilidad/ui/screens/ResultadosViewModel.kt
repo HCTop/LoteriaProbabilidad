@@ -9,6 +9,7 @@ import com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.data.repository.LoteriaRepository
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
+import com.loteria.probabilidad.domain.ml.ApuestasRepartidas
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
 import com.loteria.probabilidad.domain.ml.LogAbuelo
 import com.loteria.probabilidad.domain.ml.MemoriaIA
@@ -94,6 +95,11 @@ class ResultadosViewModel(
     // De dónde sale el bote mostrado ("" = lo escribe el usuario)
     private val _boteFuente = MutableStateFlow("")
     val boteFuente: StateFlow<String> = _boteFuente.asStateFlow()
+
+    // Varias apuestas (sustituye a la Fórmula del Abuelo en loterías de bolas)
+    private val _apuestas = MutableStateFlow<ApuestasRepartidas.Resultado?>(null)
+    val apuestas: StateFlow<ApuestasRepartidas.Resultado?> = _apuestas.asStateFlow()
+    private var apuestasJob: kotlinx.coroutines.Job? = null
 
     private val _formulaAbueloCargando = MutableStateFlow(false)
     val formulaAbueloCargando: StateFlow<Boolean> = _formulaAbueloCargando.asStateFlow()
@@ -395,6 +401,30 @@ class ResultadosViewModel(
     fun actualizarBote(bote: Double) {
         if (bote != _boteActual.value) _boteFuente.value = ""   // ahora lo ha escrito el usuario
         _boteActual.value = bote
+    }
+
+    /**
+     * Genera [numApuestas] apuestas repartidas y anti-populares para el próximo sorteo.
+     * Misma lotería + mismo sorteo + mismo N → mismas apuestas (no cambian cada vez que entras).
+     */
+    fun generarApuestas(numApuestas: Int) {
+        val tipo = tipoLoteriaActual ?: return
+        apuestasJob?.cancel()
+        apuestasJob = viewModelScope.launch {
+            val resultado = withContext(Dispatchers.Default) {
+                val yaSalidas: Set<Set<Int>> = when (tipo) {
+                    TipoLoteria.PRIMITIVA -> _historicoPrimitiva.map { it.numeros.toSet() }.toSet()
+                    TipoLoteria.BONOLOTO -> _historicoBonoloto.map { it.numeros.toSet() }.toSet()
+                    TipoLoteria.EUROMILLONES -> _historicoEuromillones.map { it.numeros.toSet() }.toSet()
+                    TipoLoteria.GORDO_PRIMITIVA -> _historicoGordo.map { it.numeros.toSet() }.toSet()
+                    else -> emptySet()
+                }
+                val sorteo = historialPredicciones.proximoSorteo(tipo.name).toString()
+                val semilla = "${tipo.name}|$sorteo|$numApuestas".hashCode().toLong()
+                ApuestasRepartidas.generar(tipo, numApuestas, semilla, yaSalidas)
+            }
+            _apuestas.value = resultado
+        }
     }
 
     fun ejecutarFormulaAbuelo() {

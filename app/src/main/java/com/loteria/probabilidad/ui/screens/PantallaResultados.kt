@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import com.loteria.probabilidad.data.model.*
+import com.loteria.probabilidad.domain.ml.ApuestasRepartidas
 import com.loteria.probabilidad.domain.ml.GestionBankroll
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
 import com.loteria.probabilidad.domain.ml.MotorInteligencia.PrediccionComplementarioDia
@@ -85,6 +86,8 @@ fun PantallaResultados(
     onBoteChange: (Double) -> Unit = {},
     onReintentarBote: () -> Unit = {},
     onCalcularFormula: () -> Unit = {},
+    apuestas: ApuestasRepartidas.Resultado? = null,
+    onGenerarApuestas: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var mostrarSelectorFechas by remember { mutableStateOf(false) }
@@ -187,7 +190,9 @@ fun PantallaResultados(
                         formulaAbueloCargando = formulaAbueloCargando,
                         onBoteChange = onBoteChange,
                         onReintentarBote = onReintentarBote,
-                        onCalcularFormula = onCalcularFormula
+                        onCalcularFormula = onCalcularFormula,
+                        apuestas = apuestas,
+                        onGenerarApuestas = onGenerarApuestas
                     )
                 }
             }
@@ -278,6 +283,8 @@ private fun ResultadosContent(
     onBoteChange: (Double) -> Unit = {},
     onReintentarBote: () -> Unit = {},
     onCalcularFormula: () -> Unit = {},
+    apuestas: ApuestasRepartidas.Resultado? = null,
+    onGenerarApuestas: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -421,8 +428,14 @@ private fun ResultadosContent(
             }
         }
 
-        // Fórmula del Abuelo
-        item {
+        // Varias apuestas (bolas) / Varios décimos (Nacional, Navidad, Niño)
+        if (esDeBolas) item {
+            VariasApuestasCard(
+                tipoLoteria = tipoLoteria,
+                resultado = apuestas,
+                onGenerar = onGenerarApuestas
+            )
+        } else item {
             FormulaAbueloCard(
                 tipoLoteria = tipoLoteria,
                 formulaAbuelo = formulaAbuelo,
@@ -1418,6 +1431,166 @@ private fun SemaforoBoteCard(
     }
 }
 
+/**
+ * 🎟️ Varias apuestas: si juegas más de una, cómo repartirlas.
+ * Compacta en la pantalla; al tocarla se abre el detalle con las apuestas.
+ */
+@Composable
+private fun VariasApuestasCard(
+    tipoLoteria: TipoLoteria,
+    resultado: ApuestasRepartidas.Resultado?,
+    onGenerar: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var abierta by remember { mutableStateOf(false) }
+    var numApuestas by remember { mutableStateOf(5) }
+    val tipoExtra = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.COMPLEMENTARIO
+
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth().clickable {
+            abierta = true
+            if (resultado == null || resultado.apuestas.size != numApuestas) onGenerar(numApuestas)
+        }
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("🎟️ Varias apuestas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Si juegas más de una, te las damos repartidas y poco jugadas",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.ExpandMore, contentDescription = "Abrir")
+        }
+    }
+
+    if (abierta) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { abierta = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { abierta = false }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
+                            }
+                            Text("🎟️ Varias apuestas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    // Cuántas
+                    item {
+                        Text("¿Cuántas apuestas vas a jugar?", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(2, 5, 10, 15).forEach { n ->
+                                FilterChip(
+                                    selected = numApuestas == n,
+                                    onClick = { numApuestas = n; onGenerar(n) },
+                                    label = { Text("$n") }
+                                )
+                            }
+                        }
+                    }
+                    // Resumen
+                    item {
+                        if (resultado == null || resultado.apuestas.size != numApuestas) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Preparando apuestas…", style = MaterialTheme.typography.bodySmall)
+                            }
+                        } else {
+                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        DatoMetodo("Te cuesta", "%.2f €".format(resultado.coste).replace(",00", "").replace(".00", ""))
+                                        DatoMetodo(
+                                            "Algún premio",
+                                            "%.1f %%".format(resultado.probAlgunPremio * 100),
+                                            Color(0xFF2E7D32)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "\"Algún premio\" = probabilidad de que al menos una apuesta acierte " +
+                                            "${resultado.minAciertos} o más números en este sorteo.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // Apuestas
+                    resultado?.takeIf { it.apuestas.size == numApuestas }?.let { r ->
+                        items(r.apuestas.size) { i ->
+                            val apuesta = r.apuestas[i]
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "Apuesta ${i + 1}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text(
+                                            apuesta.estimacionJugadores,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (apuesta.scoreUnicidad >= 60) Color(0xFF2E7D32)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        apuesta.combinacion.sorted().forEach {
+                                            BolaNumerica(numero = it, tipo = TipoBola.PRINCIPAL, modifier = Modifier.size(38.dp))
+                                        }
+                                        r.extras.getOrNull(i)?.forEach {
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            BolaNumerica(numero = it, tipo = tipoExtra, modifier = Modifier.size(32.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Cómo funciona
+                    item {
+                        Text(
+                            buildString {
+                                append("Cómo están hechas:\n")
+                                append("• Repartidas: comparten los menos números posible entre sí. Así es más ")
+                                append("probable que alguna tenga premio que si las eliges al azar o muy parecidas.\n")
+                                append("• Poco jugadas: sin fechas, múltiplos de 5 ni patrones del boleto. No acierta más, ")
+                                append("pero si te toca repartes el premio con menos gente.\n")
+                                append("• Ninguna ha salido ya en un sorteo anterior.")
+                                if (tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO) {
+                                    append("\n• El reintegro no se elige: lo asigna la máquina al validar.")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun FormulaAbueloCard(
     tipoLoteria: TipoLoteria,
@@ -1448,12 +1621,12 @@ private fun FormulaAbueloCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "La Formula del Abuelo",
+                        text = "🎟️ Varios décimos",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Cobertura + Anti-popularidad + Kelly",
+                        text = "Reparte terminaciones y evita números que juega mucha gente",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1482,7 +1655,7 @@ private fun FormulaAbueloCard(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Calculando...")
                         } else {
-                            Text("Calcular Formula del Abuelo")
+                            Text("Elegir décimos")
                         }
                     }
 

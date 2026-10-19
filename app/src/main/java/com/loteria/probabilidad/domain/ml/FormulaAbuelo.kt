@@ -5,7 +5,16 @@ import kotlin.math.ln
 import kotlin.math.exp
 
 /**
- * La Fórmula del Abuelo: orquesta los 3 pilares.
+ * (Antes "La Fórmula del Abuelo".) En la app solo se usa ya para loterías de DÍGITOS
+ * (Nacional, Navidad, Niño) → tarjeta "🎟️ Varios décimos".
+ *
+ * Para loterías de bolas se sustituyó por ApuestasRepartidas: comprobado por simulación,
+ * la cobertura de abajo (17 candidatos, máx. 15 boletos) solo cubre el ~43 % de los tríos
+ * (la "garantía" no se cumple) y BAJA la probabilidad de cobrar algún premio frente a
+ * jugar las mismas apuestas al azar (19,7 % vs 24,8 % con 15). Las afirmaciones de
+ * "mejor ROI demostrado" de los comentarios originales no se sostienen.
+ *
+ * Diseño original (3 pilares):
  * 1. Cobertura matemática - diseño C(v,k,t,m) con parámetros realistas
  * 2. Anti-popularidad ACTIVA - filtra y reemplaza combinaciones populares
  * 3. Criterio de Kelly - evalúa atractivo del sorteo
@@ -301,13 +310,13 @@ object FormulaAbuelo {
         val kelly = GestionBankroll.calcularKelly(tipoLoteria, boteActual)
 
         val resumen = buildString {
-            append("La Fórmula del Abuelo - ${tipoLoteria.displayName}\n\n")
+            append("Varios décimos - ${tipoLoteria.displayName}\n\n")
             append("COBERTURA: ${numeros.size} décimos, ${terminaciones.size} terminaciones\n")
             append("Terminaciones: $terminaciones\n\n")
             append("KELLY: ${kelly.recomendacion.displayName} (${kelly.atractividad}/10)\n")
             append("EV: ${"%.4f".format(kelly.valorEsperado)}€ por décimo\n\n")
-            append("\"El abuelo decía: reparte las terminaciones, ")
-            append("y si la suerte llama, que te pille preparado.\"")
+            append("Repartir terminaciones no hace más probable el primer premio, pero sí ")
+            append("que algún décimo cobre al menos el reintegro.")
         }
 
         return ResultadoFormulaAbuelo(

@@ -116,6 +116,7 @@ fun LoteriaProbabilidadApp(
             val progresoRelleno by viewModel.progresoRelleno.collectAsState()
             // Fórmula del Abuelo
             val formulaAbuelo by viewModel.formulaAbuelo.collectAsState()
+            val apuestas by viewModel.apuestas.collectAsState()
             val boteActual by viewModel.boteActual.collectAsState()
             val boteFuente by viewModel.boteFuente.collectAsState()
             val formulaAbueloCargando by viewModel.formulaAbueloCargando.collectAsState()
@@ -146,7 +147,9 @@ fun LoteriaProbabilidadApp(
                 formulaAbueloCargando = formulaAbueloCargando,
                 onBoteChange = { viewModel.actualizarBote(it) },
                 onReintentarBote = { viewModel.reintentarBote() },
-                onCalcularFormula = { viewModel.ejecutarFormulaAbuelo() }
+                onCalcularFormula = { viewModel.ejecutarFormulaAbuelo() },
+                apuestas = apuestas,
+                onGenerarApuestas = { viewModel.generarApuestas(it) }
             )
         }
         
