@@ -43,6 +43,10 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
   todo el histórico, z-score frente al azar, Bonferroni, validación fuera de muestra y test
   chi-cuadrado de sesgo del bombo. Para probar un método nuevo, añadirlo a `METODOS` y ejecutar.
   Resultado actual (4.101 sorteos): ningún método se distingue del azar; bombo sin sesgo (p=0,96).
+- `scripts/laboratorio_ia.py` — métodos "inventados": Gradient Boosting y regresión logística con
+  16 señales (reentreno cada 250 sorteos), mezcla de expertos (Hedge) y día de la semana.
+  Resultado: todos ≈ 0,735; la IA da la misma probabilidad (0,1222 vs 0,1223) a las bolas que salen
+  y a las que no → no hay señal aprovechable. Necesita numpy y scikit-learn.
 - `scripts/actualizar_datos.py` + `.github/workflows/actualizar-historicos.yml` —
   regeneran los CSV cada noche desde lotoideas (Google Sheets).
 
