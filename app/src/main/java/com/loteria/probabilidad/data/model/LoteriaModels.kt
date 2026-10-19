@@ -406,10 +406,11 @@ data class AnalisisKelly(
  */
 enum class RecomendacionJuego(val displayName: String, val color: Long) {
     // Semáforo de 3 colores (MINIMO y MUY_FAVORABLE ya no se usan; se dejan por compatibilidad)
-    NO_JUGAR("Mejor espera a un bote mayor", 0xFFD32F2F),
+    // Respuestas a "¿Merece la pena jugar?"
+    NO_JUGAR("No, mejor espera", 0xFFD32F2F),
     MINIMO("Mínimo", 0xFFF57C00),
-    MODERADO("Si juegas, juega poco", 0xFFF9A825),
-    FAVORABLE("Buen momento para jugar", 0xFF388E3C),
+    MODERADO("Sí, pero con poco", 0xFFF9A825),
+    FAVORABLE("Sí, buen momento", 0xFF388E3C),
     MUY_FAVORABLE("Muy favorable", 0xFF388E3C)
 }
 

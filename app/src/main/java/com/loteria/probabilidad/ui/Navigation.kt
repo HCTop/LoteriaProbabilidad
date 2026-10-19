@@ -145,6 +145,7 @@ fun LoteriaProbabilidadApp(
                 boteFuente = boteFuente,
                 formulaAbueloCargando = formulaAbueloCargando,
                 onBoteChange = { viewModel.actualizarBote(it) },
+                onReintentarBote = { viewModel.reintentarBote() },
                 onCalcularFormula = { viewModel.ejecutarFormulaAbuelo() }
             )
         }

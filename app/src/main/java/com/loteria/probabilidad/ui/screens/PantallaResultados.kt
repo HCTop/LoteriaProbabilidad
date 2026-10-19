@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -82,6 +83,7 @@ fun PantallaResultados(
     boteFuente: String = "",
     formulaAbueloCargando: Boolean = false,
     onBoteChange: (Double) -> Unit = {},
+    onReintentarBote: () -> Unit = {},
     onCalcularFormula: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -184,6 +186,7 @@ fun PantallaResultados(
                         boteFuente = boteFuente,
                         formulaAbueloCargando = formulaAbueloCargando,
                         onBoteChange = onBoteChange,
+                        onReintentarBote = onReintentarBote,
                         onCalcularFormula = onCalcularFormula
                     )
                 }
@@ -273,6 +276,7 @@ private fun ResultadosContent(
     boteFuente: String = "",
     formulaAbueloCargando: Boolean = false,
     onBoteChange: (Double) -> Unit = {},
+    onReintentarBote: () -> Unit = {},
     onCalcularFormula: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -304,7 +308,7 @@ private fun ResultadosContent(
                     tipoLoteria = tipoLoteria,
                     boteActual = boteActual,
                     boteFuente = boteFuente,
-                    onBoteChange = onBoteChange
+                    onReintentar = onReintentarBote
                 )
             }
             item {
@@ -1312,70 +1316,102 @@ private fun formatearBote(euros: Double): String = when {
 }
 
 /**
- * ¿Merece la pena jugar el próximo sorteo? Semáforo según el bote.
- * Compacta: color + frase + bote. Al tocarla: explicación y campo para cambiar el bote.
+ * ¿Merece la pena jugar el próximo sorteo? Verde / amarillo / rojo según el bote,
+ * que se obtiene solo de internet. Al tocarla: la explicación.
  */
 @Composable
 private fun SemaforoBoteCard(
     tipoLoteria: TipoLoteria,
     boteActual: Double,
     boteFuente: String,
-    onBoteChange: (Double) -> Unit,
+    onReintentar: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expandido by remember { mutableStateOf(false) }
-    // Clave boteActual: si llega el bote oficial después de pintar la tarjeta, el campo se actualiza
-    var boteTexto by remember(boteActual) { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
     val kelly = remember(tipoLoteria, boteActual) { GestionBankroll.calcularKelly(tipoLoteria, boteActual) }
     val sinBote = boteActual <= 0
     val color = if (sinBote) Color.Gray else Color(kelly.recomendacion.color)
 
-    ElevatedCard(modifier = modifier.fillMaxWidth().clickable { expandido = !expandido }) {
+    ElevatedCard(modifier = modifier.fillMaxWidth().clickable(enabled = !sinBote) { expandido = !expandido }) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SemaforoKellyMini(kelly)
+                // Semáforo
+                Box(
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(color),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        when {
+                            sinBote -> "?"
+                            kelly.recomendacion == RecomendacionJuego.FAVORABLE -> "✓"
+                            kelly.recomendacion == RecomendacionJuego.NO_JUGAR -> "✕"
+                            else -> "~"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (sinBote) "¿Merece la pena jugar?" else kelly.recomendacion.displayName,
+                        "¿Merece la pena jugar?",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        if (sinBote) "Bote no disponible todavía" else kelly.recomendacion.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = if (sinBote) MaterialTheme.colorScheme.onSurface else color
                     )
-                    Text(
-                        if (sinBote) "Toca para escribir el bote" else "Bote: ${formatearBote(boteActual)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expandido) "Contraer" else "Expandir"
-                )
-            }
-
-            AnimatedVisibility(visible = expandido) {
-                Column(modifier = Modifier.padding(top = 12.dp)) {
-                    SemaforoKellyCompleto(kelly)
-                    if (boteFuente.isNotBlank()) {
+                    if (!sinBote) {
                         Text(
-                            text = "✓ $boteFuente",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF2E7D32),
-                            modifier = Modifier.padding(top = 6.dp)
+                            "Bote: ${formatearBote(boteActual)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = boteTexto,
-                        onValueChange = { nuevo ->
-                            boteTexto = nuevo.filter { it.isDigit() }
-                            boteTexto.toLongOrNull()?.let { onBoteChange(it.toDouble()) }
-                        },
-                        label = { Text("Cambiar bote (euros)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                }
+                if (sinBote) {
+                    TextButton(onClick = onReintentar) { Text("Reintentar") }
+                } else {
+                    Icon(
+                        imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expandido) "Contraer" else "Expandir"
                     )
+                }
+            }
+
+            AnimatedVisibility(visible = expandido && !sinBote) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    Text(
+                        when (kelly.recomendacion) {
+                            RecomendacionJuego.NO_JUGAR ->
+                                "El bote es pequeño. Es cuando peor sale jugar: mejor guarda el dinero para un bote grande."
+                            RecomendacionJuego.FAVORABLE ->
+                                "Bote grande. Es el mejor momento para jugar tu presupuesto."
+                            else ->
+                                "Bote normal. Si te apetece, juega, pero con poco."
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (tipoLoteria == TipoLoteria.PRIMITIVA) {
+                        Text(
+                            "🔴 menos de 15 millones · 🟡 de 15 a 40 · 🟢 más de 40",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (boteFuente.isNotBlank()) {
+                        Text(
+                            "✓ $boteFuente",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
         }

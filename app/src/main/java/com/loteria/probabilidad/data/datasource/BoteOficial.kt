@@ -60,17 +60,14 @@ class BoteOficial(context: Context) {
      * Bote del próximo sorteo: de la caché si es reciente; si no, de la web oficial;
      * si la web falla, el último guardado. Llamar desde una corrutina (usa Dispatchers.IO).
      */
-    suspend fun obtener(tipo: TipoLoteria): Bote? = withContext(Dispatchers.IO) {
+    suspend fun obtener(tipo: TipoLoteria, forzar: Boolean = false): Bote? = withContext(Dispatchers.IO) {
         val cache = enCache(tipo)
-        if (cache != null && System.currentTimeMillis() - cache.obtenidoMs < CACHE_MS) {
+        if (!forzar && cache != null && System.currentTimeMillis() - cache.obtenidoMs < CACHE_MS) {
             return@withContext cache
         }
-        val nuevo = try {
-            descargar(tipo)
-        } catch (e: Exception) {
-            android.util.Log.w("BoteOficial", "No se pudo leer el bote de $tipo: ${e.message}")
-            null
-        }
+        // 1º la web oficial; 2º (solo Primitiva) una web de resultados como respaldo
+        val nuevo = intentar(tipo) { descargar(tipo) }
+            ?: if (tipo == TipoLoteria.PRIMITIVA) intentar(tipo) { descargarRespaldoPrimitiva() } else null
         if (nuevo != null) {
             prefs.edit()
                 .putString("fecha_${tipo.name}", nuevo.fechaSorteo)
@@ -81,6 +78,54 @@ class BoteOficial(context: Context) {
         } else {
             cache
         }
+    }
+
+    private inline fun intentar(tipo: TipoLoteria, bloque: () -> Bote?): Bote? = try {
+        bloque()
+    } catch (e: Exception) {
+        android.util.Log.w("BoteOficial", "No se pudo leer el bote de $tipo: ${e.message}")
+        null
+    }
+
+    private fun leerUrl(url: String, accept: String): String? {
+        val conexion = URL(url).openConnection() as HttpURLConnection
+        try {
+            conexion.connectTimeout = 8_000
+            conexion.readTimeout = 15_000
+            // Algunas webs rechazan peticiones sin cabeceras de navegador
+            conexion.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile")
+            conexion.setRequestProperty("Accept", accept)
+            conexion.setRequestProperty("Accept-Language", "es-ES,es;q=0.9")
+            if (conexion.responseCode != 200) return null
+            return conexion.inputStream.bufferedReader().readText()
+        } finally {
+            conexion.disconnect()
+        }
+    }
+
+    /**
+     * Respaldo para La Primitiva: primitiva.org.es/bote muestra
+     * "Lunes, 19 de octubre de 2026 Bote 38.000.000 €". Se quitan las etiquetas HTML
+     * y se busca ese patrón. Si no aparece tal cual, no se inventa nada (null).
+     */
+    private fun descargarRespaldoPrimitiva(): Bote? {
+        val html = leerUrl("https://www.primitiva.org.es/bote/", "text/html") ?: return null
+        val texto = html.replace(Regex("<[^>]+>"), " ")
+            .replace("&nbsp;", " ").replace("&euro;", "€")
+            .replace(Regex("\\s+"), " ")
+        val m = Regex("Bote ([0-9]{1,3}(?:\\.[0-9]{3})+) ?€").find(texto) ?: return null
+        val importe = m.groupValues[1].replace(".", "").toDoubleOrNull() ?: return null
+        if (importe <= 0) return null
+        // Fecha justo antes: "19 de octubre de 2026"; si no se encuentra, hoy
+        val meses = listOf("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+            "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+        val previo = texto.substring(0, m.range.first).takeLast(80)
+        val f = Regex("([0-9]{1,2}) de ([a-záéíóú]+) de ([0-9]{4})").findAll(previo).lastOrNull()
+        val fecha = f?.let {
+            val mes = meses.indexOf(it.groupValues[2].lowercase()) + 1
+            if (mes > 0) "%s-%02d-%02d".format(it.groupValues[3], mes, it.groupValues[1].toInt()) else null
+        } ?: java.time.LocalDate.now().toString()
+        return Bote(fecha, importe, System.currentTimeMillis())
     }
 
     private fun descargar(tipo: TipoLoteria): Bote? {

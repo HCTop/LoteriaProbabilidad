@@ -365,17 +365,27 @@ class ResultadosViewModel(
 
     // ==================== FÓRMULA DEL ABUELO ====================
 
-    /** Rellena el bote con el dato oficial, salvo que el usuario ya haya escrito uno. */
-    private suspend fun cargarBoteOficial(tipo: TipoLoteria) {
+    /** Vuelve a pedir el bote a internet (botón "Reintentar" de la tarjeta). */
+    fun reintentarBote() {
+        val tipo = tipoLoteriaActual ?: return
+        viewModelScope.launch {
+            _boteActual.value = 0.0
+            _boteFuente.value = ""
+            withContext(Dispatchers.IO) { cargarBoteOficial(tipo, forzar = true) }
+        }
+    }
+
+    /** Rellena el bote con el dato de internet, salvo que ya haya uno. */
+    private suspend fun cargarBoteOficial(tipo: TipoLoteria, forzar: Boolean = false) {
         try {
-            val bote = boteOficial.obtener(tipo) ?: return
+            val bote = boteOficial.obtener(tipo, forzar) ?: return
             if (_boteActual.value <= 0.0) {
                 _boteActual.value = bote.importe
                 val fecha = try {
                     java.time.LocalDate.parse(bote.fechaSorteo)
                         .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM"))
                 } catch (e: Exception) { bote.fechaSorteo }
-                _boteFuente.value = "Bote oficial del sorteo del $fecha (Loterías y Apuestas del Estado)"
+                _boteFuente.value = "Bote del sorteo del $fecha, obtenido de internet"
             }
         } catch (e: Exception) {
             android.util.Log.w("ResultadosVM", "Bote oficial no disponible: ${e.message}")

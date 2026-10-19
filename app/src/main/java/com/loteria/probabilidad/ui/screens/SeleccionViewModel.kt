@@ -219,7 +219,7 @@ class SeleccionViewModel(
                     val boteTexto = if (millones >= 1)
                         (if (millones % 1.0 == 0.0) "%.0f" else "%.1f").format(millones) + " M€"
                     else "%,.0f €".format(bote.importe).replace(',', '.')
-                    semaforoTexto = "Bote $boteTexto · ${kelly.recomendacion.displayName}"
+                    semaforoTexto = "¿Merece la pena jugar? ${kelly.recomendacion.displayName} · bote $boteTexto"
                     semaforoColor = kelly.recomendacion.color
                 }
             } catch (e: Exception) {
