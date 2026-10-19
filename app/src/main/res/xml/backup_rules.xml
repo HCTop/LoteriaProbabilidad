@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="."/>
-    <exclude domain="no_backup" path="."/>
+    <!-- No hace falta excluir "no_backup": ese directorio ya queda fuera del
+         Auto Backup por defecto y no es un domain válido para esta XML. -->
 </full-backup-content>
