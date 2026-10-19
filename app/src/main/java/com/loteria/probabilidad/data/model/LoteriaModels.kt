@@ -161,6 +161,15 @@ enum class MetodoCalculo(
                 "hacia delante para ver si se mantiene.",
         explicacionCorta = "Los más salidos en los últimos 50 sorteos"
     ),
+    PERFIL_TIPICO(
+        displayName = "🧩 Perfil típico",
+        descripcion = "La combinación con la forma que más se repite en 40 años: suma 120-180, " +
+                "2-4 impares, 2-4 bajos, una pareja de números seguidos, 3-5 decenas y un número " +
+                "repetido del último sorteo. Los demás, de los más calientes de los últimos 50 " +
+                "sorteos, prefiriendo los mayores de 31 (menos jugados). No sube la probabilidad " +
+                "de acertar; si toca, se reparte con menos gente.",
+        explicacionCorta = "Forma típica + calientes + números poco jugados"
+    ),
     DEBIDOS(
         displayName = "⏳ Debidos",
         descripcion = "Los números que más sorteos llevan sin salir ('les toca'). " +

@@ -363,6 +363,7 @@ class GestorPredicciones(
             // El Ensemble es la votación de todas: no es una estrategia en sí (antes sumaba al Genético)
             metodo.contains("Ensemble") || metodo.contains("🗳️") -> null
             metodo.contains("Calientes") -> MotorInteligencia.EstrategiaPrediccion.TENDENCIA
+            metodo.contains("Perfil típico") -> null // método fijo, sin pesos que aprender
             metodo.contains("Debidos") -> MotorInteligencia.EstrategiaPrediccion.CICLOS
             metodo.contains("Alta Confianza") || metodo.contains("🎯") -> MotorInteligencia.EstrategiaPrediccion.ALTA_CONFIANZA
             metodo.contains("Rachas") || metodo.contains("🔥") -> MotorInteligencia.EstrategiaPrediccion.RACHAS_MIX

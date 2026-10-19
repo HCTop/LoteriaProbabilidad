@@ -217,6 +217,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.PERFIL_TIPICO -> generarPerfilTipico(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 val combinaciones = (0 until numCombinaciones).map {
@@ -331,6 +332,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.PERFIL_TIPICO -> generarPerfilTipico(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map {
@@ -454,6 +456,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.PERFIL_TIPICO -> generarPerfilTipico(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones)
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map {
@@ -943,6 +946,71 @@ class CalculadorProbabilidad(private val context: Context? = null) {
      * DEBIDOS: los números que más sorteos llevan sin salir.
      * [historico] va del más reciente al más antiguo: el hueco de n es el índice del primer sorteo con n.
      */
+    /**
+     * 🧩 PERFIL TÍPICO (solo 6/49: Primitiva y Bonoloto; en otras loterías = Calientes 50).
+     * Mismo algoritmo que scripts/laboratorio_perfil.py:
+     *  - 1 número del último sorteo + 5 de los 15 más calientes de los últimos 50 sorteos
+     *    (sin más números del último sorteo).
+     *  - Forma típica obligatoria: suma 120-180, 2-4 impares, 2-4 bajos (1-24),
+     *    exactamente una pareja de seguidos y 3-5 decenas distintas.
+     *  - Puntos = calor (veces en los últimos 50) + 1,5 por cada número > 31 (menos jugados).
+     * [historico] va del más reciente al más antiguo. Determinista.
+     */
+    private fun generarPerfilTipico(
+        historico: List<List<Int>>,
+        maxNumero: Int,
+        cantidad: Int,
+        numCombinaciones: Int
+    ): List<CombinacionSugerida> {
+        if (maxNumero != 49 || cantidad != 6 || historico.isEmpty()) {
+            return generarCalientes(historico, maxNumero, cantidad, numCombinaciones)
+        }
+        val reciente = contarFrecuencias(historico.take(50).flatten(), 1..49)
+        val total = contarFrecuencias(historico.flatten(), 1..49)
+        val porCalor = compareByDescending<Int> { reciente[it] ?: 0 }
+            .thenByDescending { total[it] ?: 0 }.thenBy { it }
+        val ultimo = historico.first().toSet()
+        val pool = (1..49).filter { it !in ultimo }.sortedWith(porCalor).take(15)
+
+        fun formaTipica(c: List<Int>): Boolean {
+            val s = c.sorted()
+            val seguidos = s.zipWithNext().count { (a, b) -> b == a + 1 }
+            return s.sum() in 120..180 && s.count { it % 2 == 1 } in 2..4 &&
+                s.count { it <= 24 } in 2..4 && seguidos == 1 &&
+                s.map { it / 10 }.distinct().size in 3..5
+        }
+        fun puntos(c: List<Int>) = c.sumOf { reciente[it] ?: 0 } + 1.5 * c.count { it > 31 }
+
+        // Todas las candidatas válidas: 6 del último × C(15,5) = 18.018 combinaciones como mucho
+        val validas = mutableListOf<Pair<List<Int>, Double>>()
+        val p = pool
+        for (r in ultimo) for (a in 0 until p.size) for (b in a + 1 until p.size)
+            for (c in b + 1 until p.size) for (d in c + 1 until p.size) for (e in d + 1 until p.size) {
+                val cand = listOf(r, p[a], p[b], p[c], p[d], p[e])
+                if (formaTipica(cand)) validas.add(cand.sorted() to puntos(cand))
+            }
+        if (validas.isEmpty()) return generarCalientes(historico, maxNumero, cantidad, numCombinaciones)
+        validas.sortWith(compareByDescending<Pair<List<Int>, Double>> { it.second }
+            .thenBy { it.first.joinToString(",") { n -> n.toString().padStart(2, '0') } })
+
+        // 1ª = la mejor; las siguientes, que compartan como mucho 2 números con las ya elegidas
+        val elegidas = mutableListOf<List<Int>>()
+        for ((cand, _) in validas) {
+            if (elegidas.size >= numCombinaciones) break
+            if (elegidas.all { (it intersect cand.toSet()).size <= 2 }) elegidas.add(cand)
+        }
+        return elegidas.map { comb ->
+            val repetido = comb.first { it in ultimo }
+            val altos = comb.count { it > 31 }
+            CombinacionSugerida(
+                numeros = comb,
+                probabilidadRelativa = 50.0,
+                explicacion = "Forma típica · suma ${comb.sum()} · repite el $repetido del último sorteo · " +
+                    "$altos números altos (>31)"
+            )
+        }
+    }
+
     private fun generarDebidos(
         historico: List<List<Int>>,
         maxNumero: Int,
@@ -1004,7 +1072,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.NUMEROS_FRIOS ->
                 (0..9).sortedWith(compareBy<Int> { total[it] ?: 0 }.thenBy { it })
                     .map { it to "el que menos ha salido (${veces(it)})" }
-            MetodoCalculo.CALIENTES_50 ->
+            MetodoCalculo.CALIENTES_50, MetodoCalculo.PERFIL_TIPICO ->
                 (0..9).sortedWith(compareByDescending<Int> { recientes[it] ?: 0 }
                     .thenByDescending { total[it] ?: 0 }.thenBy { it })
                     .map { it to "el más caliente: ${recientes[it] ?: 0} veces en los últimos 50 sorteos" }
@@ -1286,6 +1354,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
             }
             MetodoCalculo.CALIENTES_50 -> generarCalientes(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones).map { it.numeros }
+            MetodoCalculo.PERFIL_TIPICO -> generarPerfilTipico(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones).map { it.numeros }
             MetodoCalculo.DEBIDOS -> generarDebidos(historico.map { it.numeros }, maxNumero, cantidadNumeros, numCombinaciones).map { it.numeros }
             MetodoCalculo.MULTI_HORIZON -> {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMultiHorizon(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
@@ -1664,7 +1733,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 (0..99).shuffled(rnd).take(10)
             }
             MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO,
-            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS -> {
+            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS, MetodoCalculo.PERFIL_TIPICO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
@@ -1803,7 +1872,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 (0..99).shuffled(rnd).take(10)
             }
             MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO,
-            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS -> {
+            MetodoCalculo.CALIENTES_50, MetodoCalculo.DEBIDOS, MetodoCalculo.PERFIL_TIPICO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }

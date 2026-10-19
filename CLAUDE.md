@@ -51,6 +51,10 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
   16 señales (reentreno cada 250 sorteos), mezcla de expertos (Hedge) y día de la semana.
   Resultado: todos ≈ 0,735; la IA da la misma probabilidad (0,1222 vs 0,1223) a las bolas que salen
   y a las que no → no hay señal aprovechable. Necesita numpy y scikit-learn.
+- `scripts/laboratorio_perfil.py` — método "🧩 Perfil típico" (`MetodoCalculo.PERFIL_TIPICO`,
+  `CalculadorProbabilidad.generarPerfilTipico`, mismo algoritmo): 1 número del último sorteo +
+  5 de los 15 más calientes (50 sorteos) con forma típica obligatoria, prefiriendo números > 31.
+  Primitiva walk-forward (4.101 sorteos): media 0,758 vs 0,735, 70 premios vs 76 esperados → azar.
 - `scripts/actualizar_datos.py` + `.github/workflows/actualizar-historicos.yml` —
   regeneran los CSV cada noche desde lotoideas (Google Sheets).
 

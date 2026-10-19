@@ -26,6 +26,7 @@ class ObtenerCombinacionesUseCase(
         MetodoCalculo.RACHAS_MIX,
         MetodoCalculo.FRECUENCIAS,
         MetodoCalculo.CALIENTES_50,
+        MetodoCalculo.PERFIL_TIPICO,
         MetodoCalculo.DEBIDOS,
         MetodoCalculo.NUMEROS_FRIOS,
         // Aleatorio = control honesto: si un método no le gana a la larga, no aporta nada.
