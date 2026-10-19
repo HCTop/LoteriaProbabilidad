@@ -22,6 +22,11 @@ import kotlin.random.Random
  */
 class CalculadorProbabilidad(private val context: Context? = null) {
 
+    companion object {
+        /** Primer sorteo de La Primitiva/Bonoloto con reintegro real (antes el CSV trae 0). */
+        const val INICIO_REINTEGRO = "1991-06-20"
+    }
+
     // Motor de IA con aprendizaje persistente
     private val motorIA = MotorInteligencia(context)
 
@@ -140,14 +145,19 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         
         // Calcular frecuencias
         val frecuenciasNumeros = contarFrecuencias(historico.flatMap { it.numeros }, 1..maxNumero)
-        val frecuenciasReintegros = contarFrecuencias(historico.map { it.reintegro }, 0..9)
+        // El reintegro existe desde el 20-06-1991; antes el CSV trae 0 (dato inventado),
+        // así que para todo lo del reintegro solo se usan sorteos desde esa fecha.
+        val historicoReintegro = historico.filter { it.fecha >= INICIO_REINTEGRO }
+        val frecuenciasReintegros = contarFrecuencias(historicoReintegro.map { it.reintegro }, 0..9)
 
-        // MEJORA 10: Predicción inteligente de reintegros
-        val reintegrosPredichos = if (historico.isNotEmpty()) {
-            motorIA.predecirReintegros(historico, numCombinaciones).map { it.numero }
+        // MEJORA 10: Predicción inteligente de reintegros (la usan los métodos de IA)
+        val reintegrosPredichos = if (historicoReintegro.isNotEmpty()) {
+            motorIA.predecirReintegros(historicoReintegro, 10).map { it.numero }
         } else {
-            (0..9).shuffled(rnd).take(numCombinaciones)
+            (0..9).shuffled(rnd)
         }
+        // Reintegros ordenados con el MISMO criterio que el método (fríos → el menos salido, etc.)
+        val reintegrosMetodo = reintegrosSegunMetodo(metodo, historicoReintegro.map { it.reintegro }, reintegrosPredichos)
         
         // Generar combinaciones según el método
         val combinacionesBase = when (metodo) {
@@ -240,14 +250,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             }
         }
 
-        // MEJORA 10: Añadir reintegro inteligente DIFERENTE a cada combinación
+        // Reintegro de cada combinación: el siguiente de la lista del método (1ª → el mejor)
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            val reintegro = reintegrosPredichos.getOrElse(index % reintegrosPredichos.size) {
-                (0..9).randomDet()
-            }
+            val (reintegro, motivo) = reintegrosMetodo[index % reintegrosMetodo.size]
             combinacion.copy(
                 complementarios = listOf(reintegro),
-                explicacion = "${combinacion.explicacion} | 🎲R:$reintegro"
+                explicacion = "${combinacion.explicacion}\n🎲 Reintegro $reintegro: $motivo"
             )
         }
 
@@ -969,6 +977,46 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 probabilidadRelativa = 50.0,
                 explicacion = "Aleatorio puro: tan válido como cualquier otro"
             )
+        }
+    }
+
+    /**
+     * Los 10 reintegros (0-9) ordenados con el criterio del método, con el motivo de cada uno.
+     * [reintegros] va del sorteo más reciente al más antiguo y solo trae datos reales.
+     * Todos tienen un 10 % de salir: esto solo hace que el reintegro siga la misma lógica
+     * que los números del método, y que el móvil lo decida solo.
+     */
+    private fun reintegrosSegunMetodo(
+        metodo: MetodoCalculo,
+        reintegros: List<Int>,
+        prediccionIA: List<Int>
+    ): List<Pair<Int, String>> {
+        if (reintegros.isEmpty()) return (0..9).shuffled(rnd).map { it to "elegido al azar (no hay datos)" }
+        val total = contarFrecuencias(reintegros, 0..9)
+        val recientes = contarFrecuencias(reintegros.take(50), 0..9)
+        val hueco = (0..9).associateWith { r -> reintegros.indexOf(r).let { if (it < 0) reintegros.size else it } }
+        val n = reintegros.size
+        fun veces(r: Int) = "${total[r] ?: 0} veces en $n sorteos"
+        return when (metodo) {
+            MetodoCalculo.FRECUENCIAS ->
+                (0..9).sortedWith(compareByDescending<Int> { total[it] ?: 0 }.thenBy { it })
+                    .map { it to "el que más ha salido (${veces(it)})" }
+            MetodoCalculo.NUMEROS_FRIOS ->
+                (0..9).sortedWith(compareBy<Int> { total[it] ?: 0 }.thenBy { it })
+                    .map { it to "el que menos ha salido (${veces(it)})" }
+            MetodoCalculo.CALIENTES_50 ->
+                (0..9).sortedWith(compareByDescending<Int> { recientes[it] ?: 0 }
+                    .thenByDescending { total[it] ?: 0 }.thenBy { it })
+                    .map { it to "el más caliente: ${recientes[it] ?: 0} veces en los últimos 50 sorteos" }
+            MetodoCalculo.DEBIDOS ->
+                (0..9).sortedWith(compareByDescending<Int> { hueco[it] ?: 0 }.thenBy { it })
+                    .map { it to "el más atrasado: lleva ${hueco[it]} sorteos sin salir" }
+            MetodoCalculo.ALEATORIO_PURO ->
+                (0..9).shuffled(rnd).map { it to "elegido al azar" }
+            else -> {
+                val orden = (prediccionIA + (0..9)).distinct().filter { it in 0..9 }
+                orden.map { it to "el que propone la IA (${veces(it)})" }
+            }
         }
     }
 

@@ -864,6 +864,11 @@ private fun JugadaRecomendadaCard(
         ?: combinaciones.first()
     val metodo = metodoDe(jugada)
     val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
+    val esSeisDe49 = tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO
+    // Motivo del reintegro: lo escribe el calculador en la explicación ("🎲 Reintegro 3: ...")
+    val motivoReintegro = jugada.explicacion.lineSequence()
+        .firstOrNull { it.trim().startsWith("🎲 Reintegro") }?.trim()
+    val perfil = remember(jugada.numeros) { if (esSeisDe49) perfilCombinacion(jugada.numeros) else emptyList() }
     var abierta by remember { mutableStateOf(false) }
 
     ElevatedCard(modifier = modifier.fillMaxWidth().clickable { abierta = true }) {
@@ -895,7 +900,8 @@ private fun JugadaRecomendadaCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "De $metodo" + if (lider != null && lider.metodo == metodo) " · el que más acierta" else "",
+                "De $metodo" + (if (lider != null && lider.metodo == metodo) " · el que más acierta" else "") +
+                    (if (perfil.isNotEmpty() && perfil.all { it.cumple }) " · forma típica ✓" else ""),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -953,6 +959,65 @@ private fun JugadaRecomendadaCard(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                    }
+                    // Reintegro (Primitiva/Bonoloto)
+                    if (esSeisDe49 && jugada.complementarios.isNotEmpty()) {
+                        item {
+                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        "🎲 Reintegro: ${jugada.complementarios.first()}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        motivoReintegro?.substringAfter(": ", "")?.replaceFirstChar { it.uppercase() }
+                                            ?.let { "$it. Sigue el mismo criterio que los números de $metodo." }
+                                            ?: "Esta jugada se guardó antes de que el reintegro siguiera el criterio del método.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "Cualquier reintegro tiene un 10 % de salir. Si lo aciertas recuperas lo apostado, " +
+                                            "y con los 6 números es lo que da el bote especial. " +
+                                            "Solo se puede elegir comprando por internet; en el boleto de papel lo pone la máquina.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // Forma de la combinación comparada con lo que suele salir
+                    if (perfil.isNotEmpty()) {
+                        item {
+                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Forma de la combinación", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    perfil.forEach { p ->
+                                        Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                                            Text(
+                                                if (p.cumple) "✓" else "·",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (p.cumple) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.width(18.dp)
+                                            )
+                                            Text(p.texto, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "Es la forma que más se repite en 40 años de sorteos. No hace más probable el premio: " +
+                                            "solo indica si la combinación se parece a lo que suele salir.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
@@ -1149,6 +1214,17 @@ private fun DetalleMetodoDialog(
                                 fontFamily = FontFamily.Monospace
                             )
                             Spacer(modifier = Modifier.height(6.dp))
+                            // Reintegro (Primitiva/Bonoloto): cuántas veces acertó; lo normal es 1 de cada 10
+                            if (minPremio == 3 && est.conComp > 0) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "🎲 Reintegros acertados: ${est.aciertosComp} de ${est.conComp} " +
+                                        "(lo normal, unos ${"%.0f".format(est.conComp / 10.0)})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 "Premios = sorteos con $minPremio o más aciertos · Ganó = sorteos en que fue el que más " +
                                     "acertó · ${est.sorteos} sorteos evaluados" +
@@ -1200,6 +1276,15 @@ private fun DetalleMetodoDialog(
                                                 append(n.toString().padStart(2, '0'))
                                                 pop()
                                             } else append(n.toString().padStart(2, '0'))
+                                        }
+                                        // Reintegro que llevaba (Primitiva/Bonoloto), en verde si acertó
+                                        if (minPremio == 3) eval.complementariosPredichos.firstOrNull()?.let { r ->
+                                            append("   R ")
+                                            if (eval.aciertosComplementarios > 0) {
+                                                pushStyle(androidx.compose.ui.text.SpanStyle(color = verde, fontWeight = FontWeight.Bold))
+                                                append("$r ✓")
+                                                pop()
+                                            } else append("$r")
                                         }
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
@@ -1267,6 +1352,34 @@ private fun DetalleMetodoDialog(
     }
 }
 
+/** Un rasgo de la forma de una combinación 6/49 y si cumple lo habitual. */
+private data class RasgoPerfil(val texto: String, val cumple: Boolean)
+
+/**
+ * Forma de una combinación de 6 números (1-49) frente a lo que más sale.
+ * Porcentajes teóricos (combinatoria), que el historial de 4.201 sorteos confirma.
+ */
+private fun perfilCombinacion(numeros: List<Int>): List<RasgoPerfil> {
+    if (numeros.size != 6) return emptyList()
+    val n = numeros.sorted()
+    val suma = n.sum()
+    val impares = n.count { it % 2 == 1 }
+    val bajos = n.count { it <= 24 }
+    val seguidos = n.zipWithNext().count { (a, b) -> b == a + 1 }
+    val decenas = n.map { it / 10 }.distinct().size
+    return listOf(
+        RasgoPerfil("Suma $suma (el 64 % de los sorteos suma entre 120 y 180)", suma in 120..180),
+        RasgoPerfil("$impares impares y ${6 - impares} pares (lo normal: 2, 3 o 4 impares, el 81 %)", impares in 2..4),
+        RasgoPerfil("$bajos bajos (1-24) y ${6 - bajos} altos (lo normal: 2, 3 o 4 bajos, el 81 %)", bajos in 2..4),
+        RasgoPerfil(
+            if (seguidos > 0) "Tiene $seguidos pareja${if (seguidos > 1) "s" else ""} de números seguidos (pasa en la mitad de los sorteos)"
+            else "Sin números seguidos (pasa en la mitad de los sorteos)",
+            seguidos <= 1
+        ),
+        RasgoPerfil("Números en $decenas decenas distintas (lo normal: 3, 4 o 5, el 98 %)", decenas in 3..5)
+    )
+}
+
 /** Estadística de un método a lo largo del historial. */
 private data class EstadisticaMetodo(
     val metodo: String,
@@ -1276,7 +1389,10 @@ private data class EstadisticaMetodo(
     val premios: Int,
     val victorias: Int,
     val distribucion: Map<Int, Int>,
-    val simulados: Int
+    val simulados: Int,
+    /** Sorteos en que acertó el reintegro/estrella/clave y sorteos en que llevaba uno. */
+    val aciertosComp: Int = 0,
+    val conComp: Int = 0
 )
 
 /** Ranking: primero más premios, luego mayor máximo, luego mejor media. */
@@ -1287,11 +1403,17 @@ private fun estadisticasPorMetodo(
     val aciertos = mutableMapOf<String, MutableList<Int>>()
     val victorias = mutableMapOf<String, Int>()
     val simulados = mutableMapOf<String, Int>()
+    val aciertosComp = mutableMapOf<String, Int>()
+    val conComp = mutableMapOf<String, Int>()
     for (entrada in historial) {
         val max = entrada.evaluaciones.maxOfOrNull { it.aciertosNumeros } ?: continue
         for (eval in entrada.evaluaciones) {
             aciertos.getOrPut(eval.metodo) { mutableListOf() }.add(eval.aciertosNumeros)
             if (entrada.simulado) simulados[eval.metodo] = (simulados[eval.metodo] ?: 0) + 1
+            if (eval.complementariosPredichos.isNotEmpty()) {
+                conComp[eval.metodo] = (conComp[eval.metodo] ?: 0) + 1
+                if (eval.aciertosComplementarios > 0) aciertosComp[eval.metodo] = (aciertosComp[eval.metodo] ?: 0) + 1
+            }
             if (eval.aciertosNumeros == max && max > 0) {
                 victorias[eval.metodo] = (victorias[eval.metodo] ?: 0) + 1
             }
@@ -1306,7 +1428,9 @@ private fun estadisticasPorMetodo(
             premios = lista.count { it >= minPremio },
             victorias = victorias[metodo] ?: 0,
             distribucion = lista.groupingBy { it }.eachCount(),
-            simulados = simulados[metodo] ?: 0
+            simulados = simulados[metodo] ?: 0,
+            aciertosComp = aciertosComp[metodo] ?: 0,
+            conComp = conComp[metodo] ?: 0
         )
     }.sortedWith(
         compareByDescending<EstadisticaMetodo> { it.premios }

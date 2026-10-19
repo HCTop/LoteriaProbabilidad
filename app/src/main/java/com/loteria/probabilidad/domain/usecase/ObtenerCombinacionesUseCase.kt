@@ -147,19 +147,10 @@ class ObtenerCombinacionesUseCase(
         val semillaComp = tipoLoteria.name.hashCode().toLong() * 31 + historicoFiltrado.size.toLong() + combHash
         val rndComp = Random(semillaComp)
         val combinacionesFinales = when (tipoLoteria) {
-            TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> {
-                // Generar lista de 10 reintegros (0-9) barajados, reciclar cíclicamente
-                val reintegrosBarajados = (0..9).shuffled(rndComp)
-                todasCombinaciones.mapIndexed { index, comb ->
-                    val nuevoReintegro = reintegrosBarajados[index % reintegrosBarajados.size]
-                    comb.copy(
-                        complementarios = listOf(nuevoReintegro),
-                        explicacion = comb.explicacion.replace(
-                            Regex("\\| 🎲R:\\d+"), "| 🎲R:$nuevoReintegro"
-                        )
-                    )
-                }
-            }
+            // Primitiva/Bonoloto: cada método ya trae SU reintegro, calculado con su mismo
+            // criterio (CalculadorProbabilidad.reintegrosSegunMetodo). Antes aquí se barajaban
+            // al azar y el reintegro de la jugada no tenía nada que ver con el método.
+            TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> todasCombinaciones
             TipoLoteria.EUROMILLONES -> {
                 // Generar pares de estrellas variados
                 val todasEstrellas = (1..12).shuffled(rndComp)

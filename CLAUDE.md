@@ -37,6 +37,10 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `service/SincronizacionDiariaWorker` — WorkManager, 1 vez al día (~9:00, con red y batería):
   descarga CSV, `evaluarPendientes()` y guarda predicciones del próximo sorteo de las 4 loterías
   de bolas. Se programa en `MainActivity.onCreate` con KEEP (no se duplica).
+- Reintegro (Primitiva/Bonoloto): cada método lo calcula con SU criterio en
+  `CalculadorProbabilidad.reintegrosSegunMetodo` (fríos → el menos salido, calientes → últimos 50,
+  debidos → el más atrasado…) usando solo sorteos desde `INICIO_REINTEGRO` (1991-06-20; antes el CSV
+  trae 0 inventado). `ObtenerCombinacionesUseCase` ya NO lo baraja. Solo se puede elegir comprando online.
 - Historial: entradas `simulado = true` vienen del botón "Simular los últimos 10 sorteos"
   (walk-forward, sin entrenar la IA); una evaluación real sustituye a la simulada.
 - `scripts/laboratorio_primitiva.py` — laboratorio honesto: ~22 métodos en walk-forward sobre

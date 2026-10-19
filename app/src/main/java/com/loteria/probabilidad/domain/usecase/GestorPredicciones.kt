@@ -53,12 +53,22 @@ class GestorPredicciones(
          * vuelve a ejecutarse. Para repetirla en desarrollo: subir VERSION_METODOS.
          */
         private const val VERSION_METODOS = 2
+        /** Subir para rehacer solo las predicciones pendientes del próximo sorteo. */
+        private const val VERSION_REINTEGRO = 1
 
         fun migrarSiHaceFalta(context: Context) {
             val app = context.applicationContext
             val prefs = app.getSharedPreferences("gestor_predicciones", Context.MODE_PRIVATE)
-            if (prefs.getInt("version_metodos", 1) >= VERSION_METODOS) return
             val historial = HistorialPredicciones(app)
+            // Reintegro por método (v1): rehacer SOLO las predicciones del próximo sorteo
+            // (aún no se ha celebrado, así que no hay look-ahead). El historial se conserva.
+            if (prefs.getInt("version_reintegro", 0) < VERSION_REINTEGRO) {
+                for (tipo in listOf(TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO)) {
+                    historial.eliminarPredicciones(tipo.name, historial.proximoSorteo(tipo.name).toString())
+                }
+                prefs.edit().putInt("version_reintegro", VERSION_REINTEGRO).apply()
+            }
+            if (prefs.getInt("version_metodos", 1) >= VERSION_METODOS) return
             for (tipo in LOTERIAS_EVALUABLES) {
                 historial.borrarSimulados(tipo.name)
                 historial.eliminarPredicciones(tipo.name, historial.proximoSorteo(tipo.name).toString())
