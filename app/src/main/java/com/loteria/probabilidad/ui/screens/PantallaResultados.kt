@@ -1133,7 +1133,8 @@ private fun FormulaAbueloCard(
 
 @Composable
 private fun SemaforoKellyMini(kelly: AnalisisKelly) {
-    val color = Color(kelly.recomendacion.color)
+    // Sin bote no se puede juzgar: gris en vez de rojo
+    val color = if (kelly.boteActual <= 0) Color.Gray else Color(kelly.recomendacion.color)
     Box(
         modifier = Modifier
             .size(28.dp)
@@ -1142,8 +1143,12 @@ private fun SemaforoKellyMini(kelly: AnalisisKelly) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "${kelly.atractividad}",
-            style = MaterialTheme.typography.labelSmall,
+            text = if (kelly.boteActual <= 0) "?" else when (kelly.recomendacion) {
+                RecomendacionJuego.FAVORABLE, RecomendacionJuego.MUY_FAVORABLE -> "✓"
+                RecomendacionJuego.NO_JUGAR -> "✕"
+                else -> "~"
+            },
+            style = MaterialTheme.typography.labelMedium,
             color = Color.White,
             fontWeight = FontWeight.Bold
         )
@@ -1152,7 +1157,7 @@ private fun SemaforoKellyMini(kelly: AnalisisKelly) {
 
 @Composable
 private fun SemaforoKellyCompleto(kelly: AnalisisKelly) {
-    val color = Color(kelly.recomendacion.color)
+    val color = if (kelly.boteActual <= 0) Color.Gray else Color(kelly.recomendacion.color)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1171,21 +1176,34 @@ private fun SemaforoKellyCompleto(kelly: AnalisisKelly) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "${kelly.atractividad}/10",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = when (kelly.recomendacion) {
+                            RecomendacionJuego.FAVORABLE, RecomendacionJuego.MUY_FAVORABLE -> "✓"
+                            RecomendacionJuego.NO_JUGAR -> "✕"
+                            else -> "~"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Column {
                     Text(
-                        text = kelly.recomendacion.displayName,
+                        text = if (kelly.boteActual <= 0) "Falta el bote" else kelly.recomendacion.displayName,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = color
                     )
                     Text(
-                        text = "EV: ${"%.4f".format(kelly.valorEsperado)} euros/boleto",
+                        text = when {
+                            kelly.boteActual <= 0 ->
+                                "Escribe el bote del próximo sorteo para saber si merece la pena."
+                            kelly.recomendacion == RecomendacionJuego.NO_JUGAR ->
+                                "El bote es pequeño. Es cuando peor sale jugar: mejor guarda el dinero para un bote grande."
+                            kelly.recomendacion == RecomendacionJuego.MODERADO ->
+                                "Bote normal. Si te apetece, juega, pero con poco."
+                            else ->
+                                "Bote grande. Es el mejor momento para jugar tu presupuesto."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1193,12 +1211,18 @@ private fun SemaforoKellyCompleto(kelly: AnalisisKelly) {
             }
             if (kelly.boteActual > 0) {
                 Text(
-                    text = "Bote: ${"%.0f".format(kelly.boteActual)} euros",
+                    text = "Bote: ${"%,.0f".format(kelly.boteActual).replace(',', '.')} €",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
+            Text(
+                text = "Primitiva: 🔴 menos de 15 millones · 🟡 de 15 a 40 · 🟢 más de 40",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 }

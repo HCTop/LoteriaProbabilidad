@@ -16,6 +16,20 @@ import com.loteria.probabilidad.data.model.*
  */
 object GestionBankroll {
 
+    // Semáforo: lo que devuelve de media cada euro jugado (1,0 = recuperas lo apostado).
+    // Calibrado para La Primitiva: 0,57 ≈ bote de 15 M€ y 0,72 ≈ bote de 40 M€.
+    private const val RETORNO_AMARILLO = 0.57
+    private const val RETORNO_VERDE = 0.715
+
+    // Gravamen especial sobre premios de loterías: 20 % de lo que exceda de 40.000 €
+    private const val EXENTO_IMPUESTO = 40_000.0
+    private const val TIPO_IMPUESTO = 0.20
+
+    /** Lo que se cobra de verdad de un premio bruto, tras Hacienda. */
+    fun premioNetoImpuestos(bruto: Double): Double =
+        if (bruto <= EXENTO_IMPUESTO) bruto else bruto - (bruto - EXENTO_IMPUESTO) * TIPO_IMPUESTO
+
+
     /**
      * Estructura de premios REAL de cada lotería española.
      *
@@ -306,16 +320,20 @@ object GestionBankroll {
             (estructura.tasaRetorno * precio - evFijos).coerceAtLeast(0.0)
         } else 0.0
 
-        val evPorcentaje = catPorcentaje.sumOf { it.porcentajeFondo * fondoVariablePorApuesta }
+        // El bote va al ganador de la categoría más alta (en la Primitiva, la Especial 6+R).
+        // Si conocemos el bote, el % de fondo de esa categoría YA está dentro del bote:
+        // contarlo además como porcentaje era sumarlo dos veces.
+        val catBote = catPorcentaje.firstOrNull()
+        val evPorcentaje = catPorcentaje
+            .filter { boteActual <= 0 || it != catBote }
+            .sumOf { it.porcentajeFondo * fondoVariablePorApuesta }
 
         // EV base (sin bote acumulado)
         val evBase = evFijos + evPorcentaje
 
-        // EV del bote acumulado (se suma a la categoría especial/primera)
-        val evBote = if (boteActual > 0 && catPorcentaje.isNotEmpty()) {
-            // El bote va al ganador de la categoría más alta (Especial o 1ª)
-            val catBote = catPorcentaje.first()
-            boteActual * catBote.probabilidad
+        // EV del bote acumulado, NETO de Hacienda (20 % de lo que pase de 40.000 €)
+        val evBote = if (boteActual > 0 && catBote != null) {
+            premioNetoImpuestos(boteActual) * catBote.probabilidad
         } else 0.0
 
         val evTotal = evBase + evBote
@@ -333,13 +351,13 @@ object GestionBankroll {
             ((mediaRetorno - 1.0) / varianzaRetorno).coerceIn(0.0, 1.0)
         } else 0.0
 
-        // Clasificación
+        // Clasificación en 3 colores según lo que devuelve cada euro de media.
+        // En La Primitiva equivale a: rojo < ~15 M€ de bote, amarillo 15-40 M€, verde > ~40 M€.
+        // (Antes llamaba "favorable" a apuestas que pierden un 30 %: engañoso.)
         val (recomendacion, atractividad) = when {
-            evPorEuro > 0 -> RecomendacionJuego.MUY_FAVORABLE to 10
-            evPorEuro > -0.3 -> RecomendacionJuego.FAVORABLE to 7
-            evPorEuro > -0.5 -> RecomendacionJuego.MODERADO to 5
-            evPorEuro > -0.7 -> RecomendacionJuego.MINIMO to 3
-            else -> RecomendacionJuego.NO_JUGAR to 1
+            mediaRetorno >= RETORNO_VERDE -> RecomendacionJuego.FAVORABLE to 8
+            mediaRetorno >= RETORNO_AMARILLO -> RecomendacionJuego.MODERADO to 5
+            else -> RecomendacionJuego.NO_JUGAR to 2
         }
 
         // Desglose detallado
