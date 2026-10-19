@@ -300,6 +300,14 @@ private fun ResultadosContent(
         //  2. Qué método acierta más (con su detalle al tocar)
         if (esDeBolas) {
             item {
+                SemaforoBoteCard(
+                    tipoLoteria = tipoLoteria,
+                    boteActual = boteActual,
+                    boteFuente = boteFuente,
+                    onBoteChange = onBoteChange
+                )
+            }
+            item {
                 JugadaRecomendadaCard(
                     combinaciones = analisis.combinacionesSugeridas,
                     historialEvaluado = historialEvaluado,
@@ -1294,6 +1302,86 @@ private fun estadisticasPorMetodo(
 // FÓRMULA DEL ABUELO - Card expandible
 // ═══════════════════════════════════════════════════════════════════
 
+/** "38 millones", "1,5 millones" o "800.000 €". */
+private fun formatearBote(euros: Double): String = when {
+    euros >= 1_000_000 -> {
+        val m = euros / 1_000_000
+        (if (m % 1.0 == 0.0) "%.0f" else "%.1f").format(m) + " millones"
+    }
+    else -> "%,.0f €".format(euros).replace(',', '.')
+}
+
+/**
+ * ¿Merece la pena jugar el próximo sorteo? Semáforo según el bote.
+ * Compacta: color + frase + bote. Al tocarla: explicación y campo para cambiar el bote.
+ */
+@Composable
+private fun SemaforoBoteCard(
+    tipoLoteria: TipoLoteria,
+    boteActual: Double,
+    boteFuente: String,
+    onBoteChange: (Double) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expandido by remember { mutableStateOf(false) }
+    // Clave boteActual: si llega el bote oficial después de pintar la tarjeta, el campo se actualiza
+    var boteTexto by remember(boteActual) { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
+    val kelly = remember(tipoLoteria, boteActual) { GestionBankroll.calcularKelly(tipoLoteria, boteActual) }
+    val sinBote = boteActual <= 0
+    val color = if (sinBote) Color.Gray else Color(kelly.recomendacion.color)
+
+    ElevatedCard(modifier = modifier.fillMaxWidth().clickable { expandido = !expandido }) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SemaforoKellyMini(kelly)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (sinBote) "¿Merece la pena jugar?" else kelly.recomendacion.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (sinBote) MaterialTheme.colorScheme.onSurface else color
+                    )
+                    Text(
+                        if (sinBote) "Toca para escribir el bote" else "Bote: ${formatearBote(boteActual)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expandido) "Contraer" else "Expandir"
+                )
+            }
+
+            AnimatedVisibility(visible = expandido) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    SemaforoKellyCompleto(kelly)
+                    if (boteFuente.isNotBlank()) {
+                        Text(
+                            text = "✓ $boteFuente",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF2E7D32),
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = boteTexto,
+                        onValueChange = { nuevo ->
+                            boteTexto = nuevo.filter { it.isDigit() }
+                            boteTexto.toLongOrNull()?.let { onBoteChange(it.toDouble()) }
+                        },
+                        label = { Text("Cambiar bote (euros)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun FormulaAbueloCard(
     tipoLoteria: TipoLoteria,
@@ -1306,13 +1394,7 @@ private fun FormulaAbueloCard(
     modifier: Modifier = Modifier
 ) {
     var expandido by remember { mutableStateOf(false) }
-    // Clave boteActual: si llega el bote oficial después de pintar la tarjeta, el campo se actualiza
-    var boteTexto by remember(boteActual) { mutableStateOf(if (boteActual > 0) boteActual.toLong().toString() else "") }
-
-    // Calcular Kelly rápido para el semáforo (sin necesidad de calcular cobertura)
-    val kellyRapido = remember(tipoLoteria, boteActual) {
-        GestionBankroll.calcularKelly(tipoLoteria, boteActual)
-    }
+    // El semáforo del bote vive ahora en su propia tarjeta (SemaforoBoteCard)
 
     ElevatedCard(
         modifier = modifier.fillMaxWidth()
@@ -1340,9 +1422,6 @@ private fun FormulaAbueloCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                // Semáforo Kelly mini
-                SemaforoKellyMini(kellyRapido)
-                Spacer(modifier = Modifier.width(8.dp))
                 Icon(
                     imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (expandido) "Contraer" else "Expandir"
@@ -1352,36 +1431,6 @@ private fun FormulaAbueloCard(
             // Contenido expandible
             AnimatedVisibility(visible = expandido) {
                 Column(modifier = Modifier.padding(top = 12.dp)) {
-                    // Input bote
-                    OutlinedTextField(
-                        value = boteTexto,
-                        onValueChange = { nuevo ->
-                            boteTexto = nuevo.filter { it.isDigit() }
-                            boteTexto.toLongOrNull()?.let { onBoteChange(it.toDouble()) }
-                        },
-                        label = { Text("Bote actual (euros)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (boteFuente.isNotBlank()) {
-                        Text(
-                            text = "✓ $boteFuente",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF2E7D32),
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Semáforo Kelly completo
-                    SemaforoKellyCompleto(kellyRapido)
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
                     // Botón calcular
                     Button(
                         onClick = onCalcular,

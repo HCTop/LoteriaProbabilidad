@@ -145,7 +145,9 @@ fun PantallaSeleccionLoteria(
                     ultimoSorteoComp2 = pred?.ultimoSorteoComplementario2,
                     metodoMejorAcierto = pred?.metodoMejorAcierto?.displayName ?: "",
                     aciertosDelMejorMetodo = pred?.aciertosDelMejorMetodo ?: 0,
-                    numerosAcertados = pred?.numerosAcertadosMejorMetodo ?: emptyList()
+                    numerosAcertados = pred?.numerosAcertadosMejorMetodo ?: emptyList(),
+                    semaforoTexto = pred?.semaforoTexto,
+                    semaforoColor = pred?.semaforoColor
                 )
             }
 

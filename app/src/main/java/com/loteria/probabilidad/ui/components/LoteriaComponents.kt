@@ -1028,7 +1028,10 @@ fun LoteriaButtonConPrediccion(
     // Nuevo: mejor método en último sorteo
     metodoMejorAcierto: String = "",
     aciertosDelMejorMetodo: Int = 0,
-    numerosAcertados: List<Int> = emptyList()
+    numerosAcertados: List<Int> = emptyList(),
+    // Semáforo del bote: "Bote 38 M€ · Si juegas, juega poco" + color
+    semaforoTexto: String? = null,
+    semaforoColor: Long? = null
 ) {
     val (icon, gradientColors) = when (tipoLoteria) {
         TipoLoteria.PRIMITIVA -> Icons.Default.Casino to listOf(Color(0xFF1976D2), Color(0xFF42A5F5))
@@ -1134,6 +1137,28 @@ fun LoteriaButtonConPrediccion(
                 Column(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
+                    // === SEMÁFORO DEL BOTE ===
+                    if (semaforoTexto != null && semaforoColor != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(semaforoColor))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = semaforoTexto,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(semaforoColor)
+                            )
+                        }
+                    }
+
                     // === ÚLTIMO SORTEO ===
                     if (ultimoSorteoNumeros.isNotEmpty()) {
                         Row(

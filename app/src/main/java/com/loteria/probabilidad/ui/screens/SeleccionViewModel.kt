@@ -5,10 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.loteria.probabilidad.data.datasource.ActualizadorHistorico
+import com.loteria.probabilidad.data.datasource.BoteOficial
 import com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.data.repository.LoteriaRepository
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
+import com.loteria.probabilidad.domain.ml.GestionBankroll
 import com.loteria.probabilidad.domain.ml.HistorialPredicciones
 import com.loteria.probabilidad.domain.ml.MemoriaIA
 import com.loteria.probabilidad.domain.ml.MotorInteligencia
@@ -41,7 +43,10 @@ data class PrediccionLoteria(
     // Nuevo: mejor método en último sorteo
     val metodoMejorAcierto: MetodoCalculo? = null,
     val aciertosDelMejorMetodo: Int = 0,
-    val numerosAcertadosMejorMetodo: List<Int> = emptyList()
+    val numerosAcertadosMejorMetodo: List<Int> = emptyList(),
+    // Semáforo del bote (null si no se conoce el bote)
+    val semaforoTexto: String? = null,
+    val semaforoColor: Long? = null
 )
 
 /**
@@ -63,7 +68,8 @@ class SeleccionViewModel(
     private val obtenerCombinacionesUseCase: ObtenerCombinacionesUseCase,
     private val historialPredicciones: HistorialPredicciones,
     private val gestorPredicciones: GestorPredicciones,
-    private val actualizador: ActualizadorHistorico
+    private val actualizador: ActualizadorHistorico,
+    private val boteOficial: BoteOficial
 ) : ViewModel() {
 
     private val _predicciones = MutableStateFlow<Map<TipoLoteria, PrediccionLoteria>>(emptyMap())
@@ -202,8 +208,29 @@ class SeleccionViewModel(
             comp2 = null
         }
 
+        // Semáforo: ¿merece la pena jugar con el bote actual?
+        var semaforoTexto: String? = null
+        var semaforoColor: Long? = null
+        if (esDeBolas) {
+            try {
+                boteOficial.obtener(tipo)?.let { bote ->
+                    val kelly = GestionBankroll.calcularKelly(tipo, bote.importe)
+                    val millones = bote.importe / 1_000_000
+                    val boteTexto = if (millones >= 1)
+                        (if (millones % 1.0 == 0.0) "%.0f" else "%.1f").format(millones) + " M€"
+                    else "%,.0f €".format(bote.importe).replace(',', '.')
+                    semaforoTexto = "Bote $boteTexto · ${kelly.recomendacion.displayName}"
+                    semaforoColor = kelly.recomendacion.color
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("SeleccionVM", "Sin bote para $tipo: ${e.message}")
+            }
+        }
+
         return PrediccionLoteria(
             tipoLoteria = tipo,
+            semaforoTexto = semaforoTexto,
+            semaforoColor = semaforoColor,
             mejorMetodo = mejorMetodo,
             tasaAcierto = tasaAcierto,
             numerosPredichos = numerosPredichos,
@@ -359,7 +386,8 @@ class SeleccionViewModel(
             val gestor = GestorPredicciones(repository, useCase, historial, MemoriaIA(context))
 
             return SeleccionViewModel(
-                repository, motorIA, useCase, historial, gestor, ActualizadorHistorico(context)
+                repository, motorIA, useCase, historial, gestor, ActualizadorHistorico(context),
+                BoteOficial(context)
             ) as T
         }
     }
