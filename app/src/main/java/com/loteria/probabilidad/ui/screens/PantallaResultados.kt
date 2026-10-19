@@ -290,13 +290,23 @@ private fun ResultadosContent(
             )
         }
 
-        // Historial de predicciones: qué ha acertado cada método en cada sorteo.
-        // Se muestra siempre en loterías de bolas (aunque esté vacío, explica por qué).
-        if (tipoLoteria in listOf(
-                TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO,
-                TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA
-            )
-        ) {
+        val esDeBolas = tipoLoteria in listOf(
+            TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO,
+            TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA
+        )
+
+        // Loterías de bolas: pantalla limpia con 2 tarjetas
+        //  1. Qué jugar en el próximo sorteo (combinación del método que más acierta)
+        //  2. Qué método acierta más (con su detalle al tocar)
+        if (esDeBolas) {
+            item {
+                JugadaRecomendadaCard(
+                    combinaciones = analisis.combinacionesSugeridas,
+                    historialEvaluado = historialEvaluado,
+                    tipoLoteria = tipoLoteria,
+                    prediccionesInfo = prediccionesInfo
+                )
+            }
             item {
                 EvaluacionCard(
                     historialEvaluado = historialEvaluado,
@@ -309,7 +319,9 @@ private fun ResultadosContent(
         }
 
         // MEJORA 11: Mejores números/dígitos para hoy
-        if (mejoresNumerosHoy.isNotEmpty()) {
+        // En loterías de bolas se quita: era "frecuencia por día de la semana", que el
+        // laboratorio demostró que no aporta nada frente al azar.
+        if (!esDeBolas && mejoresNumerosHoy.isNotEmpty()) {
             item {
                 if (tipoLoteria in listOf(TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO)) {
                     // Para loterías de 5 dígitos, mostrar dígitos más frecuentes por posición
@@ -327,7 +339,7 @@ private fun ResultadosContent(
         }
 
         // MEJORA 11B: Predicción de complementario para próximo sorteo
-        if (prediccionComplementario != null || prediccionEstrellas.isNotEmpty()) {
+        if (!esDeBolas && (prediccionComplementario != null || prediccionEstrellas.isNotEmpty())) {
             item {
                 val tipoComp = when (tipoLoteria) {
                     TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> "reintegro"
@@ -371,8 +383,8 @@ private fun ResultadosContent(
             }
         }
 
-        // Título de combinaciones
-        item {
+        // Título de combinaciones (en loterías de bolas están dentro de la tarjeta de la jugada)
+        if (!esDeBolas) item {
             Text(
                 text = "Combinaciones sugeridas",
                 style = MaterialTheme.typography.titleLarge,
@@ -381,7 +393,9 @@ private fun ResultadosContent(
         }
 
         // Lista de combinaciones
-        if (analisis.combinacionesSugeridas.isEmpty()) {
+        if (esDeBolas) {
+            // nada: se ven al abrir "Jugada para el próximo sorteo"
+        } else if (analisis.combinacionesSugeridas.isEmpty()) {
             item {
                 EmptyStateCard()
             }
@@ -794,6 +808,143 @@ private fun EmptyStateCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
+        }
+    }
+}
+
+/** Nombre del método de una combinación guardada (primera línea de la explicación). */
+private fun metodoDe(c: CombinacionSugerida): String =
+    c.explicacion.lineSequence().firstOrNull()?.trim() ?: ""
+
+/**
+ * Tarjeta compacta: la combinación a jugar en el próximo sorteo = la guardada del método
+ * que va primero en el ranking (el mismo que la tarjeta 🏆). Al tocarla: el porqué y
+ * las combinaciones de todos los métodos.
+ */
+@Composable
+private fun JugadaRecomendadaCard(
+    combinaciones: List<CombinacionSugerida>,
+    historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
+    tipoLoteria: TipoLoteria,
+    prediccionesInfo: String,
+    modifier: Modifier = Modifier
+) {
+    if (combinaciones.isEmpty()) return
+    val minPremio = if (tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO) 3 else 2
+    val ranking = remember(historialEvaluado) { estadisticasPorMetodo(historialEvaluado, minPremio) }
+    val lider = ranking.firstOrNull()
+    // La del líder; si aún no hay historial (o el líder no tiene combinación), Ensemble o la primera
+    val jugada = combinaciones.firstOrNull { lider != null && metodoDe(it) == lider.metodo }
+        ?: combinaciones.firstOrNull { metodoDe(it) == MetodoCalculo.ENSEMBLE_VOTING.displayName }
+        ?: combinaciones.first()
+    val metodo = metodoDe(jugada)
+    val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
+    var abierta by remember { mutableStateOf(false) }
+
+    ElevatedCard(modifier = modifier.fillMaxWidth().clickable { abierta = true }) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "🎯 Jugada para el próximo sorteo",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(Icons.Default.ExpandMore, contentDescription = "Ver detalle")
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            // Bolas algo más pequeñas que las de serie para que 6 + reintegro quepan en un móvil
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                jugada.numeros.sorted().forEach {
+                    BolaNumerica(numero = it, tipo = TipoBola.PRINCIPAL, modifier = Modifier.size(38.dp))
+                }
+                if (jugada.complementarios.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    jugada.complementarios.forEach {
+                        BolaNumerica(numero = it, tipo = tipoComp, modifier = Modifier.size(34.dp))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "De $metodo" + if (lider != null && lider.metodo == metodo) " · el que más acierta" else "",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+
+    if (abierta) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { abierta = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { abierta = false }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
+                            }
+                            Text(
+                                "Jugada para el próximo sorteo",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (prediccionesInfo.isNotBlank()) {
+                            Text(
+                                prediccionesInfo,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // Por qué esta
+                    item {
+                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("Por qué esta combinación", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    if (lider != null && lider.metodo == metodo)
+                                        "Es la de $metodo, el método que más premios lleva: ${lider.premios} premios " +
+                                            "en ${lider.sorteos} sorteos (máximo ${lider.maximo} aciertos). " +
+                                            "Si otro método pasa a liderar, la jugada pasará a ser la suya."
+                                    else
+                                        "Todavía no hay sorteos evaluados, así que se muestra la de $metodo. " +
+                                            "En cuanto haya historial, será la del método que más acierte.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "Recuerda: todas las combinaciones tienen la misma probabilidad de salir.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    // Todas las combinaciones guardadas
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Combinaciones de todos los métodos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    items(combinaciones.size) { i ->
+                        CombinacionCard(
+                            combinacion = combinaciones[i],
+                            indice = i,
+                            tipoLoteria = tipoLoteria
+                        )
+                    }
+                }
+            }
         }
     }
 }
