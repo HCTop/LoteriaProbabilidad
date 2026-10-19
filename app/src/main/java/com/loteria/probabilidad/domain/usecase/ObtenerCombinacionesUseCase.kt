@@ -19,6 +19,7 @@ class ObtenerCombinacionesUseCase(
      */
     private val metodosOrdenados = listOf(
         MetodoCalculo.METODO_ABUELO,
+        MetodoCalculo.MULTI_HORIZON,
         MetodoCalculo.ENSEMBLE_VOTING,
         MetodoCalculo.ALTA_CONFIANZA,
         MetodoCalculo.IA_GENETICA,

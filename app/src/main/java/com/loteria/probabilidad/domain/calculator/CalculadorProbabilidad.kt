@@ -206,6 +206,12 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.MULTI_HORIZON -> {
+                val combinaciones = (0 until numCombinaciones).map {
+                    motorIA.generarCombinacionMultiHorizon(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
+                }
+                combinaciones
+            }
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
                 val resultado = motorIA.ejecutarMetodoAbuelo(historico, maxNumero, cantidadNumeros, tipoLoteria.name)
@@ -314,6 +320,11 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.MULTI_HORIZON -> {
+                (0 until numCombinaciones).map {
+                    motorIA.generarCombinacionMultiHorizon(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
+                }
+            }
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
                 val resultado = motorIA.ejecutarMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "EURO")
@@ -430,6 +441,11 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.FRECUENCIAS -> generarPorFrecuencias(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.NUMEROS_FRIOS -> generarNumerosFrios(frecuenciasNumeros, cantidadNumeros, numCombinaciones, historico.size)
             MetodoCalculo.ALEATORIO_PURO -> generarAleatorio(maxNumero, cantidadNumeros, numCombinaciones)
+            MetodoCalculo.MULTI_HORIZON -> {
+                (0 until numCombinaciones).map {
+                    motorIA.generarCombinacionMultiHorizon(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
+                }
+            }
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 MÉTODO DEL ABUELO: Sistema de convergencias
                 val resultado = motorIA.ejecutarMetodoAbuelo(historicoConvertido, maxNumero, cantidadNumeros, "GORDO")
@@ -1154,6 +1170,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.RACHAS_MIX -> {
                 (0 until numCombinaciones).map { motorIA.generarCombinacionMixta(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
             }
+            MetodoCalculo.MULTI_HORIZON -> {
+                (0 until numCombinaciones).map { motorIA.generarCombinacionMultiHorizon(historico, 49, cantidadNumeros, "PRIMITIVA").numeros }
+            }
             MetodoCalculo.METODO_ABUELO -> {
                 // 🔮 Método del Abuelo: Sistema de convergencias
                 val resultado = motorIA.ejecutarMetodoAbuelo(historico, 49, cantidadNumeros, "PRIMITIVA")
@@ -1529,7 +1548,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 // Completamente aleatorio
                 (0..99).shuffled(rnd).take(10)
             }
-            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
@@ -1667,7 +1686,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             MetodoCalculo.ALEATORIO_PURO -> {
                 (0..99).shuffled(rnd).take(10)
             }
-            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.METODO_ABUELO -> {
+            MetodoCalculo.ENSEMBLE_VOTING, MetodoCalculo.ALTA_CONFIANZA, MetodoCalculo.RACHAS_MIX, MetodoCalculo.MULTI_HORIZON, MetodoCalculo.METODO_ABUELO -> {
                 // Para loterías de 5 dígitos, usar frecuencias como fallback
                 terminaciones.groupingBy { it }.eachCount()
                     .entries.sortedByDescending { it.value }
