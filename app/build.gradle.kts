@@ -75,6 +75,9 @@ dependencies {
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     
+    // Tarea diaria en segundo plano (guardar/evaluar predicciones sin abrir la app)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     

@@ -34,6 +34,11 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `service/AprendizajeContinuo` — mini walk-forward mientras la app está visible.
   OJO: evalúa versiones simplificadas de las estrategias y escribe en el mismo historial
   que los sorteos reales (pendiente de separar).
+- `service/SincronizacionDiariaWorker` — WorkManager, 1 vez al día (~9:00, con red y batería):
+  descarga CSV, `evaluarPendientes()` y guarda predicciones del próximo sorteo de las 4 loterías
+  de bolas. Se programa en `MainActivity.onCreate` con KEEP (no se duplica).
+- Historial: entradas `simulado = true` vienen del botón "Simular los últimos 10 sorteos"
+  (walk-forward, sin entrenar la IA); una evaluación real sustituye a la simulada.
 - `scripts/actualizar_datos.py` + `.github/workflows/actualizar-historicos.yml` —
   regeneran los CSV cada noche desde lotoideas (Google Sheets).
 

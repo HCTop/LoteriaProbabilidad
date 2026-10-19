@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.loteria.probabilidad.service.AprendizajeContinuo
 import com.loteria.probabilidad.service.AprendizajeService
+import com.loteria.probabilidad.service.SincronizacionDiariaWorker
 import com.loteria.probabilidad.ui.LoteriaProbabilidadApp
 import com.loteria.probabilidad.ui.screens.PantallaLogin
 import com.loteria.probabilidad.ui.theme.LoteriaProbabilidadTheme
@@ -46,6 +47,10 @@ class MainActivity : ComponentActivity() {
         // Verificar autenticación previa
         val prefs = getSharedPreferences("loteria_auth", Context.MODE_PRIVATE)
         estaAutenticado = prefs.getBoolean("autenticado", false)
+
+        // Tarea diaria: descarga resultados, evalúa aciertos y guarda las predicciones
+        // del próximo sorteo aunque no se abra la app (no se duplica si ya existe)
+        SincronizacionDiariaWorker.programar(applicationContext)
 
         // La descarga de históricos la hace ahora la pantalla de inicio (SeleccionViewModel)
         // ANTES de evaluar aciertos; aquí solo se duplicaba la descarga en paralelo.
