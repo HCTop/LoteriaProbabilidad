@@ -1031,9 +1031,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val totalCombs = metodos.size * totalCombsPorMetodo
         var combinacionGlobal = 0
         
-        // OPTIMIZACIÓN: Precalcular frecuencias una sola vez
+        // Las frecuencias se calculan dentro del bucle, solo con sorteos anteriores
         val maxNumero = if (tipoLoteria == "BONOLOTO") 49 else 49
-        val frecuenciasGlobales = contarFrecuencias(historico.flatMap { it.numeros }, 1..maxNumero)
         
         // Probar cada método
         for (metodo in metodos) {
@@ -1058,7 +1057,10 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 
                 // OPTIMIZACIÓN: Generar combinaciones directamente sin crear AnalisisProbabilidad completo
                 val combinaciones = generarCombinacionesRapido(
-                    frecuenciasGlobales, metodo, 6, 5, historicoHastaMomento
+                    // Frecuencias SOLO del pasado: antes se usaban las de todo el histórico,
+                    // incluido el sorteo que se está evaluando (look-ahead)
+                    contarFrecuencias(historicoHastaMomento.flatMap { it.numeros }, 1..maxNumero),
+                    metodo, 6, 5, historicoHastaMomento
                 )
                 
                 val sorteoReal = historico[i]
@@ -1196,9 +1198,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val totalCombs = metodos.size * diasAtras * 5
         var combinacionGlobal = 0
         
-        // Precalcular frecuencias
-        val frecuenciasNumeros = contarFrecuencias(historico.flatMap { it.numeros }, 1..50)
-        val frecuenciasEstrellas = contarFrecuencias(historico.flatMap { it.estrellas }, 1..12)
         
         for (metodo in metodos) {
             onProgresoBacktest?.invoke(metodo.displayName, combinacionGlobal, totalCombs)
@@ -1218,7 +1217,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val historicoHastaMomento = historico.drop(i + 1)
                 if (historicoHastaMomento.isEmpty()) continue
                 
-                // Generar combinaciones rápido
+                // Frecuencias SOLO del pasado (sin el sorteo evaluado ni posteriores)
+                val frecuenciasNumeros = contarFrecuencias(historicoHastaMomento.flatMap { it.numeros }, 1..50)
+                val frecuenciasEstrellas = contarFrecuencias(historicoHastaMomento.flatMap { it.estrellas }, 1..12)
                 val combinaciones = generarCombinacionesEuroRapido(frecuenciasNumeros, frecuenciasEstrellas, metodo, 5)
                 val sorteoReal = historico[i]
                 val numerosReales = sorteoReal.numeros.toSet()
@@ -1316,8 +1317,6 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         val totalCombs = metodos.size * diasAtras * 5
         var combinacionGlobal = 0
         
-        // Precalcular frecuencias
-        val frecuencias = contarFrecuencias(historico.flatMap { it.numeros }, 1..54)
         
         for (metodo in metodos) {
             onProgresoBacktest?.invoke(metodo.displayName, combinacionGlobal, totalCombs)
@@ -1336,7 +1335,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
                 val historicoHastaMomento = historico.drop(i + 1)
                 if (historicoHastaMomento.isEmpty()) continue
                 
-                // Generar combinaciones rápido
+                // Frecuencias SOLO del pasado (sin el sorteo evaluado ni posteriores)
+                val frecuencias = contarFrecuencias(historicoHastaMomento.flatMap { it.numeros }, 1..54)
                 val topNums = frecuencias.entries.sortedByDescending { it.value }.map { it.key }
                 val combinaciones = when (metodo) {
                     MetodoCalculo.FRECUENCIAS -> (0 until 5).map { j -> topNums.drop(j).take(5).sorted() }

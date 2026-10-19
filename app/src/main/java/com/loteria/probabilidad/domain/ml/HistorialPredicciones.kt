@@ -30,7 +30,7 @@ class HistorialPredicciones(context: Context) {
     )
 
     companion object {
-        private const val MAX_HISTORIAL = 20
+        private const val MAX_HISTORIAL = 60
 
         private val DIAS_SORTEO = mapOf(
             "PRIMITIVA" to listOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY),

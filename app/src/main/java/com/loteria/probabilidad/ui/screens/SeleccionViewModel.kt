@@ -4,11 +4,15 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.loteria.probabilidad.data.datasource.ActualizadorHistorico
 import com.loteria.probabilidad.data.datasource.LoteriaLocalDataSource
 import com.loteria.probabilidad.data.model.*
 import com.loteria.probabilidad.data.repository.LoteriaRepository
 import com.loteria.probabilidad.domain.calculator.CalculadorProbabilidad
+import com.loteria.probabilidad.domain.ml.HistorialPredicciones
+import com.loteria.probabilidad.domain.ml.MemoriaIA
 import com.loteria.probabilidad.domain.ml.MotorInteligencia
+import com.loteria.probabilidad.domain.usecase.GestorPredicciones
 import com.loteria.probabilidad.domain.usecase.ObtenerCombinacionesUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +60,10 @@ private data class UltimoSorteoInfo(
 class SeleccionViewModel(
     private val repository: LoteriaRepository,
     private val motorIA: MotorInteligencia,
-    private val obtenerCombinacionesUseCase: ObtenerCombinacionesUseCase
+    private val obtenerCombinacionesUseCase: ObtenerCombinacionesUseCase,
+    private val historialPredicciones: HistorialPredicciones,
+    private val gestorPredicciones: GestorPredicciones,
+    private val actualizador: ActualizadorHistorico
 ) : ViewModel() {
 
     private val _predicciones = MutableStateFlow<Map<TipoLoteria, PrediccionLoteria>>(emptyMap())
@@ -75,6 +82,14 @@ class SeleccionViewModel(
 
             try {
                 withContext(Dispatchers.IO) {
+                    // Traer los resultados nuevos ANTES de evaluar: si no, el sorteo de ayer
+                    // no estaba en el CSV y sus aciertos no aparecían hasta otro día
+                    try {
+                        if (actualizador.necesitaActualizar()) actualizador.actualizar()
+                    } catch (e: Exception) {
+                        android.util.Log.w("SeleccionVM", "Sin actualización de históricos: ${e.message}")
+                    }
+
                     val prediccionesMap = mutableMapOf<TipoLoteria, PrediccionLoteria>()
 
                     for (tipo in TipoLoteria.entries) {
@@ -118,45 +133,74 @@ class SeleccionViewModel(
         // Obtener último sorteo
         val (ultimoNumeros, ultimoFecha, ultimoComp1, ultimoComp2) = obtenerUltimoSorteo(tipo)
 
-        // Evaluar qué método habría acertado más en el último sorteo
-        val (metodoMejor, aciertos, numerosAcertados) =
-            evaluarMejorMetodoEnUltimoSorteo(tipo, ultimoNumeros, ultimoFecha)
+        val esDeBolas = tipo in GestorPredicciones.LOTERIAS_EVALUABLES
 
-        // Usar el método que mejor funcionó, o ENSEMBLE_VOTING por defecto
-        val mejorMetodo = metodoMejor ?: MetodoCalculo.ENSEMBLE_VOTING
+        val metodoMejor: MetodoCalculo?
+        val aciertos: Int
+        val numerosAcertados: List<Int>
+        val mejorMetodo: MetodoCalculo
+        val tasaAcierto: Double
+        val numerosPredichos: List<Int>
+        val comp1: Int?
+        val comp2: Int?
 
-        // Obtener tasa de acierto del historial si existe
-        val stats = motorIA.calcularEstadisticasPredicciones(tipo.name)
-        val tasaAcierto = ((stats["promedioAciertos"] as? Double) ?: 0.0) * 100 / 6
+        if (esDeBolas) {
+            // 1. Evaluar sorteos pendientes con lo que se GUARDÓ antes de cada sorteo
+            gestorPredicciones.evaluarPendientes(tipo)
 
-        // Obtener predicción para el próximo sorteo
-        val analisis = obtenerCombinacionesUseCase.ejecutar(
-            tipoLoteria = tipo,
-            numCombinaciones = 1,
-            rangoFechas = RangoFechas(null, null),
-            metodo = mejorMetodo
-        )
+            // 2. Predicciones del próximo sorteo: las guardadas o se generan y se guardan.
+            //    Lo que se enseña aquí es exactamente lo que luego se evalúa.
+            val combinaciones = gestorPredicciones.obtenerOGenerar(tipo).analisis.combinacionesSugeridas
 
-        // Para Nacional/Navidad/Niño, convertir el número a dígitos individuales
-        val numerosPredichos = if (tipo in listOf(TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO)) {
-            // El análisis devuelve números de 5 dígitos, los convertimos a dígitos individuales
-            val combinacion = analisis.combinacionesSugeridas.firstOrNull()?.numeros ?: emptyList()
-            if (combinacion.isNotEmpty()) {
-                // Si el primer número es grande (>9), es un número de 5 dígitos
-                val primerNumero = combinacion.first()
-                if (primerNumero > 9) {
-                    primerNumero.toString().padStart(5, '0').map { it.digitToInt() }
-                } else {
-                    // Ya son dígitos individuales
-                    combinacion.take(5)
-                }
-            } else emptyList()
+            // 3. "Mejor método del último sorteo" = evaluación REAL de lo guardado
+            val historial = historialPredicciones.cargarHistorial(tipo.name)
+            val mejorEvalUltimo = historial.firstOrNull { it.fechaSorteo == ultimoFecha }
+                ?.evaluaciones?.maxByOrNull { it.aciertosNumeros }
+            metodoMejor = mejorEvalUltimo?.let { metodoPorNombre(it.metodo) }
+            aciertos = mejorEvalUltimo?.aciertosNumeros ?: 0
+            numerosAcertados = mejorEvalUltimo?.numerosPredichos?.filter { it in ultimoNumeros } ?: emptyList()
+
+            // 4. Método a mostrar: el mejor del ranking histórico (con al menos 3 sorteos),
+            //    si no el mejor del último sorteo, y si no Ensemble
+            val ranking = historialPredicciones.obtenerRankingMetodos(tipo.name)
+            val mejorDelRanking = if (historial.size >= 3) ranking.firstOrNull() else null
+            mejorMetodo = mejorDelRanking?.let { metodoPorNombre(it.first) }
+                ?: metodoMejor ?: MetodoCalculo.ENSEMBLE_VOTING
+
+            val cantidad = if (tipo == TipoLoteria.PRIMITIVA || tipo == TipoLoteria.BONOLOTO) 6 else 5
+            val promedio = ranking.firstOrNull { metodoPorNombre(it.first) == mejorMetodo }?.second ?: 0.0
+            tasaAcierto = promedio * 100 / cantidad
+
+            val combinacion = combinaciones.firstOrNull { nombreMetodo(it) == mejorMetodo.displayName }
+                ?: combinaciones.firstOrNull()
+            numerosPredichos = combinacion?.numeros ?: emptyList()
+            // Complementarios de la MISMA combinación guardada (antes salían de otro cálculo)
+            comp1 = combinacion?.complementarios?.getOrNull(0)
+            comp2 = combinacion?.complementarios?.getOrNull(1)
         } else {
-            analisis.combinacionesSugeridas.firstOrNull()?.numeros ?: emptyList()
-        }
+            // Nacional / Navidad / Niño: sin evaluación por bolas
+            metodoMejor = null
+            aciertos = 0
+            numerosAcertados = emptyList()
+            mejorMetodo = MetodoCalculo.ENSEMBLE_VOTING
+            tasaAcierto = 0.0
 
-        // Complementarios predichos
-        val (comp1, comp2) = obtenerComplementarioPredicho(tipo)
+            val analisis = obtenerCombinacionesUseCase.ejecutar(
+                tipoLoteria = tipo,
+                numCombinaciones = 1,
+                rangoFechas = RangoFechas(null, null),
+                metodo = mejorMetodo
+            )
+            val combinacion = analisis.combinacionesSugeridas.firstOrNull()?.numeros ?: emptyList()
+            numerosPredichos = when {
+                combinacion.isEmpty() -> emptyList()
+                // Número de 5 cifras → dígitos individuales
+                combinacion.first() > 9 -> combinacion.first().toString().padStart(5, '0').map { it.digitToInt() }
+                else -> combinacion.take(5)
+            }
+            comp1 = null
+            comp2 = null
+        }
 
         return PrediccionLoteria(
             tipoLoteria = tipo,
@@ -238,70 +282,12 @@ class SeleccionViewModel(
         }
     }
 
-    /**
-     * Evalúa qué método habría acertado más números en el último sorteo.
-     */
-    private fun evaluarMejorMetodoEnUltimoSorteo(
-        tipo: TipoLoteria,
-        ultimoSorteoNumeros: List<Int>,
-        ultimoSorteoFecha: String
-    ): Triple<MetodoCalculo?, Int, List<Int>> {
-        if (ultimoSorteoNumeros.isEmpty()) return Triple(null, 0, emptyList())
+    /** Nombre del método de una combinación guardada (primera línea de la explicación). */
+    private fun nombreMetodo(c: CombinacionSugerida): String =
+        c.explicacion.lineSequence().firstOrNull()?.trim() ?: ""
 
-        // Para que la evaluación sea honesta, cada método solo puede ver los sorteos
-        // ANTERIORES al último. Antes se usaba el histórico completo (incluido el propio
-        // sorteo que se evaluaba), así que los métodos de "calientes" lo "acertaban" con trampa.
-        val hastaDiaAnterior = try {
-            java.time.LocalDate.parse(ultimoSorteoFecha).minusDays(1).toString()
-        } catch (e: Exception) {
-            return Triple(null, 0, emptyList())
-        }
-        val rangoSinUltimo = RangoFechas(null, hastaDiaAnterior)
-
-        // Para Nacional/Navidad/Niño no hacemos esta evaluación (son dígitos, no números)
-        if (tipo in listOf(TipoLoteria.LOTERIA_NACIONAL, TipoLoteria.NAVIDAD, TipoLoteria.NINO)) {
-            return Triple(null, 0, emptyList())
-        }
-
-        var mejorMetodo: MetodoCalculo? = null
-        var maxAciertos = 0
-        var numerosAcertados = emptyList<Int>()
-
-        val metodosAEvaluar = listOf(
-            MetodoCalculo.ENSEMBLE_VOTING,
-            MetodoCalculo.ALTA_CONFIANZA,
-            MetodoCalculo.IA_GENETICA,
-            MetodoCalculo.RACHAS_MIX,
-            MetodoCalculo.FRECUENCIAS
-        )
-
-        val ultimoSet = ultimoSorteoNumeros.toSet()
-
-        for (metodo in metodosAEvaluar) {
-            try {
-                val analisis = obtenerCombinacionesUseCase.ejecutar(
-                    tipoLoteria = tipo,
-                    numCombinaciones = 1,
-                    rangoFechas = rangoSinUltimo,
-                    metodo = metodo
-                )
-
-                val prediccion = analisis.combinacionesSugeridas.firstOrNull()?.numeros ?: continue
-                val acertados = prediccion.filter { it in ultimoSet }
-                val aciertos = acertados.size
-
-                if (aciertos > maxAciertos) {
-                    maxAciertos = aciertos
-                    mejorMetodo = metodo
-                    numerosAcertados = acertados
-                }
-            } catch (e: Exception) {
-                continue
-            }
-        }
-
-        return Triple(mejorMetodo, maxAciertos, numerosAcertados)
-    }
+    private fun metodoPorNombre(nombre: String): MetodoCalculo? =
+        MetodoCalculo.entries.firstOrNull { it.displayName == nombre.trim() }
 
     private fun obtenerComplementarioPredicho(tipo: TipoLoteria): Pair<Int?, Int?> {
         return try {
@@ -369,8 +355,12 @@ class SeleccionViewModel(
             val calculador = CalculadorProbabilidad(context)
             val useCase = ObtenerCombinacionesUseCase(repository, calculador)
             val motorIA = MotorInteligencia(context)
+            val historial = HistorialPredicciones(context)
+            val gestor = GestorPredicciones(repository, useCase, historial, MemoriaIA(context))
 
-            return SeleccionViewModel(repository, motorIA, useCase) as T
+            return SeleccionViewModel(
+                repository, motorIA, useCase, historial, gestor, ActualizadorHistorico(context)
+            ) as T
         }
     }
 }

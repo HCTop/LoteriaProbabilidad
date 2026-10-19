@@ -2081,7 +2081,8 @@ class MotorInteligencia(private val context: Context? = null) {
         // Backtest demostró que consenso entre ventanas es señal más fiable
         val ventanasCorta = listOf(5, 12, 30)
         val topPorVentana = ventanasCorta.map { vc ->
-            val recientes = historico.takeLast(vc)
+            // historico[0] = sorteo más reciente → los recientes son take(), no takeLast()
+            val recientes = historico.take(vc)
             (1..maxNumero).associateWith { n -> recientes.count { n in it.numeros } }
                 .entries.sortedByDescending { it.value }.take(12).map { it.key }.toSet()
         }
