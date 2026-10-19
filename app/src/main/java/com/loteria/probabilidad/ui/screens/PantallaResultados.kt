@@ -800,107 +800,139 @@ private fun EvaluacionCard(
     rankingMetodos: List<Triple<String, Double, Int>>,
     modifier: Modifier = Modifier
 ) {
-    ElevatedCard(
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+    // Por defecto se ve el último sorteo; el resto se despliega
+    var verTodos by remember { mutableStateOf(false) }
+    var verRanking by remember { mutableStateOf(false) }
+    val visibles = if (verTodos) historialEvaluado.take(15) else historialEvaluado.take(1)
+
+    ElevatedCard(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "Rendimiento de Predicciones",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
+            Text(
+                text = "Lo que se guardó ANTES de cada sorteo, comparado con el resultado real",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            visibles.forEach { entrada ->
+                Spacer(modifier = Modifier.height(12.dp))
+                SorteoEvaluadoBloque(entrada)
+            }
 
-            // Último sorteo evaluado
-            val ultimo = historialEvaluado.firstOrNull()
-            if (ultimo != null) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (ultimo.mejorAciertos >= 3)
-                            Color(0xFF2E7D32).copy(alpha = 0.15f)
-                        else
-                            MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "Ultimo sorteo: ${ultimo.fechaSorteo}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Mejor: ${ultimo.mejorMetodo} (${ultimo.mejorAciertos} aciertos)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        // Mostrar todos los resultados del último sorteo
-                        ultimo.evaluaciones
-                            .sortedByDescending { it.aciertosNumeros }
-                            .take(5)
-                            .forEach { eval ->
-                                val emoji = when (eval.aciertosNumeros) {
-                                    0 -> "  "
-                                    1 -> "  "
-                                    2 -> "  "
-                                    3 -> "  "
-                                    else -> "  "
-                                }
-                                Text(
-                                    text = "$emoji${eval.metodo}: ${eval.aciertosNumeros} aciertos",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (eval.aciertosNumeros >= 3)
-                                        Color(0xFF2E7D32)
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                    }
+            if (historialEvaluado.size > 1) {
+                TextButton(onClick = { verTodos = !verTodos }) {
+                    Text(
+                        if (verTodos) "Ver solo el último sorteo"
+                        else "Ver sorteos anteriores (${historialEvaluado.size - 1})"
+                    )
                 }
             }
 
             // Ranking histórico de métodos
             if (rankingMetodos.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Ranking historico (${historialEvaluado.size} sorteos)",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                rankingMetodos.take(5).forEachIndexed { index, (metodo, promedio, mejor) ->
-                    val medalla = when (index) {
-                        0 -> "1."
-                        1 -> "2."
-                        2 -> "3."
-                        else -> "${index + 1}."
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "$medalla $metodo",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "${"%.1f".format(promedio)} media | $mejor max",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
+                TextButton(onClick = { verRanking = !verRanking }) {
+                    Text(
+                        if (verRanking) "Ocultar ranking"
+                        else "Ranking de métodos (${historialEvaluado.size} sorteos)"
+                    )
+                }
+                if (verRanking) {
+                    rankingMetodos.forEachIndexed { index, (metodo, promedio, mejor) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${index + 1}. $metodo",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "${"%.2f".format(promedio)} media | $mejor máx",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Un sorteo evaluado: números reales + cada combinación guardada con sus aciertos marcados. */
+@Composable
+private fun SorteoEvaluadoBloque(entrada: HistorialPredicciones.EntradaHistorial) {
+    val verde = Color(0xFF2E7D32)
+    val reales = entrada.evaluaciones.firstOrNull()?.numerosReales ?: emptyList()
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (entrada.mejorAciertos >= 3) verde.copy(alpha = 0.12f)
+            else MaterialTheme.colorScheme.surfaceVariant
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "Sorteo ${entrada.fechaSorteo}",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Resultado: ${reales.sorted().joinToString(" - ")}",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            entrada.evaluaciones
+                .sortedByDescending { it.aciertosNumeros }
+                .forEach { eval ->
+                    val texto = androidx.compose.ui.text.buildAnnotatedString {
+                        eval.numerosPredichos.sorted().forEachIndexed { i, n ->
+                            if (i > 0) append(" ")
+                            if (n in reales) {
+                                pushStyle(androidx.compose.ui.text.SpanStyle(color = verde, fontWeight = FontWeight.Bold))
+                                append(n.toString().padStart(2, '0'))
+                                pop()
+                            } else {
+                                append(n.toString().padStart(2, '0'))
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = eval.metodo,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = texto,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        val extra = if (eval.aciertosComplementarios > 0) " +${eval.aciertosComplementarios}C" else ""
+                        Text(
+                            text = "${eval.aciertosNumeros}$extra",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (eval.aciertosNumeros >= 3) verde else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
         }
     }
 }

@@ -21,7 +21,9 @@ class ActualizadorHistorico(private val context: Context) {
     companion object {
         private const val PREFS_KEY = "actualizador_historico_v1"
         private const val KEY_ULTIMA_ACTUALIZACION = "ultima_actualizacion"
-        private const val INTERVALO_MS = 24 * 60 * 60 * 1000L // 24 horas
+        // 3 h (antes 24 h): con 24 h el sorteo de anoche podía tardar casi un día
+        // en llegar y, por tanto, en evaluarse
+        private const val INTERVALO_MS = 3 * 60 * 60 * 1000L
 
         private const val BASE_URL =
             "https://raw.githubusercontent.com/HCTop/LoteriaProbabilidad/master/app/src/main/res/raw"
@@ -59,8 +61,8 @@ class ActualizadorHistorico(private val context: Context) {
         for (csvFile in CSV_FILES) {
             try {
                 val connection = URL("$BASE_URL/$csvFile").openConnection() as HttpURLConnection
-                connection.connectTimeout = 15_000
-                connection.readTimeout   = 60_000
+                connection.connectTimeout = 8_000
+                connection.readTimeout   = 30_000
                 connection.setRequestProperty("User-Agent", "LoteriaProbabilidad-App")
 
                 if (connection.responseCode == 200) {
