@@ -882,6 +882,12 @@ private fun JugadaRecomendadaCard(
         ?: combinaciones.firstOrNull { metodoDe(it) == MetodoCalculo.ENSEMBLE_VOTING.displayName }
         ?: combinaciones.first()
     val metodo = metodoDe(jugada)
+    // Métodos empatados a premios con el líder (aparte de él), con su combinación guardada
+    val empatados = remember(ranking, combinaciones) {
+        if (lider == null) emptyList() else ranking.drop(1)
+            .filter { it.premios == lider.premios }
+            .mapNotNull { est -> combinaciones.firstOrNull { metodoDe(it) == est.metodo }?.let { est to it } }
+    }
     val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
     val esSeisDe49 = tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO
     // Motivo del reintegro: lo escribe el calculador en la explicación ("🎲 Reintegro 3: ...")
@@ -924,6 +930,36 @@ private fun JugadaRecomendadaCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // Empate a premios: también sus jugadas, con el motivo del desempate
+            if (lider != null && empatados.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "🤝 Empate a ${lider.premios} premios",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                empatados.take(3).forEach { (est, comb) ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        comb.numeros.sorted().forEach {
+                            BolaNumerica(numero = it, tipo = TipoBola.PRINCIPAL, modifier = Modifier.size(30.dp))
+                        }
+                        comb.complementarios.forEach {
+                            BolaNumerica(numero = it, tipo = tipoComp, modifier = Modifier.size(26.dp))
+                        }
+                    }
+                    Text(
+                        "De ${est.metodo} · ${motivoDesempate(lider, est)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 
@@ -1108,6 +1144,15 @@ private fun EvaluacionCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(mejor.metodo, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        val empatados = ranking.drop(1).filter { it.premios == mejor.premios }
+                        if (empatados.isNotEmpty()) {
+                            Text(
+                                "🤝 Empatado a premios con " + empatados.joinToString(", ") { it.metodo } +
+                                    " · " + motivoDesempate(mejor, empatados.first()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Icon(Icons.Default.ExpandMore, contentDescription = "Ver detalle")
                 }
@@ -1414,6 +1459,18 @@ private fun DetalleMetodoDialog(
             }
         }
     }
+}
+
+/**
+ * Por qué [ganador] va delante de [otro] cuando tienen los mismos premios:
+ * 1º mayor máximo de aciertos, 2º mejor media. Si todo es igual, empate total.
+ */
+private fun motivoDesempate(ganador: EstadisticaMetodo, otro: EstadisticaMetodo): String = when {
+    ganador.maximo != otro.maximo ->
+        "desempate: ${ganador.metodo} llegó a ${ganador.maximo} aciertos (${otro.metodo}, a ${otro.maximo})"
+    "%.3f".format(ganador.media) != "%.3f".format(otro.media) ->
+        "desempate por media: %.3f frente a %.3f".format(ganador.media, otro.media)
+    else -> "empate total (mismos premios, máximo y media)"
 }
 
 /** Un rasgo de la forma de una combinación 6/49 y si cumple lo habitual. */
