@@ -50,6 +50,10 @@ fun PantallaSeleccionLoteria(
     val predicciones by viewModel.predicciones.collectAsState()
     val cargandoPredicciones by viewModel.cargando.collectAsState()
 
+    // Al volver a esta pantalla (p. ej. desde Primitiva tras cambiar 10/100/1.000),
+    // volver a elegir el método que más acierta y su jugada
+    LaunchedEffect(Unit) { viewModel.refrescarJugadas() }
+
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
 
