@@ -691,6 +691,58 @@ def guardar_nacional() -> int:
 
 
 # ============================================================================
+# BOTES DEL PRÓXIMO SORTEO (para el semáforo de la app)
+# ============================================================================
+
+BOTES_JSON = Path(__file__).resolve().parent.parent / "datos" / "botes.json"
+API_BOTES = "https://www.loteriasyapuestas.es/servicios/proximosv3?game_id={}&num=3"
+JUEGOS_BOTE = {"PRIMITIVA": "LAPR", "BONOLOTO": "BONO", "EUROMILLONES": "EMIL", "GORDO_PRIMITIVA": "ELGR"}
+
+
+def guardar_botes() -> int:
+    """
+    Lee el bote del próximo sorteo de cada lotería de la API oficial y lo guarda en
+    datos/botes.json. La app lo usa de respaldo cuando el móvil no puede leer la web oficial.
+    Solo se guardan botes de la lotería pedida y de sorteos de hoy en adelante; si no se
+    consigue ninguno, el archivo anterior se deja como está (nunca se inventa un bote).
+    """
+    import json
+    from urllib.request import urlopen, Request  # siempre urllib (no depende de requests)
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    cabeceras = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Referer": "https://www.loteriasyapuestas.es/es/resultados",
+    }
+    botes = {}
+    for tipo, juego in JUEGOS_BOTE.items():
+        try:
+            req = Request(API_BOTES.format(juego), headers=cabeceras)
+            with urlopen(req, timeout=30) as r:
+                sorteos = json.loads(r.read().decode("utf-8"))
+            for s in sorteos:
+                fecha = str(s.get("fecha", ""))[:10]
+                bote = s.get("premio_bote")
+                if s.get("game_id") != juego or not bote or len(fecha) != 10 or fecha < hoy:
+                    continue
+                importe = float(bote)
+                if importe > 0:
+                    botes[tipo] = {"fecha": fecha, "importe": importe}
+                    print(f"   💰 {tipo}: {importe:,.0f} € (sorteo {fecha})")
+                    break
+            else:
+                print(f"   ⚠️ {tipo}: sin bote anunciado")
+        except Exception as e:
+            print(f"   ⚠️ {tipo}: no se pudo leer el bote ({e})")
+    if botes:
+        BOTES_JSON.parent.mkdir(parents=True, exist_ok=True)
+        BOTES_JSON.write_text(json.dumps({"actualizado": datetime.now().isoformat(timespec="minutes"),
+                                          "botes": botes}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return len(botes)
+
+
+# ============================================================================
 # FUNCIÓN PRINCIPAL
 # ============================================================================
 
@@ -767,6 +819,11 @@ def main():
     print("-" * 50)
     total += guardar_nino()
     
+    # ========== BOTES ==========
+    print("\n💰 BOTES DEL PRÓXIMO SORTEO (API oficial)")
+    print("-" * 50)
+    guardar_botes()
+
     # ========== RESUMEN ==========
     print("\n" + "=" * 70)
     print(f"✅ TOTAL: {total} sorteos descargados/guardados")

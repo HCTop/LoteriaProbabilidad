@@ -273,6 +273,20 @@ class SeleccionViewModel(
             } catch (e: Exception) {
                 android.util.Log.w("SeleccionVM", "Sin bote para $tipo: ${e.message}")
             }
+            // Sin bote no se puede calcular: decirlo en vez de no enseñar nada
+            if (semaforoTexto == null) {
+                semaforoTexto = "¿Merece la pena jugar? Sin datos del bote todavía"
+                semaforoColor = 0xFF8A8A8A
+            }
+        } else {
+            // Nacional, Navidad y Niño: premios fijos, sin bote. Por ley se reparte en premios
+            // el 70 % de lo jugado, así que la respuesta no cambia de un sorteo a otro.
+            // (No se usa GestionBankroll: su tabla de premios de décimos no cuadra con el 70 %.)
+            // 0,70 € por euro está entre los umbrales amarillo (0,57) y verde (0,715) → amarillo.
+            val recomendacion = RecomendacionJuego.MODERADO
+            semaforoTexto = "¿Merece la pena jugar? ${recomendacion.displayName} · " +
+                "premios fijos: vuelve el 70 % de lo jugado"
+            semaforoColor = recomendacion.color
         }
 
         return PrediccionLoteria(

@@ -33,6 +33,8 @@ class BoteOficial(context: Context) {
         private const val PREFS = "bote_oficial_v1"
         private const val CACHE_MS = 3 * 60 * 60 * 1000L
         private const val URL_BASE = "https://www.loteriasyapuestas.es/servicios/proximosv3"
+        private const val URL_GITHUB =
+            "https://raw.githubusercontent.com/HCTop/LoteriaProbabilidad/master/datos/botes.json"
 
         /** Código de juego en la API oficial (los 4 comprobados en oct-2026). */
         private val GAME_ID = mapOf(
@@ -65,9 +67,11 @@ class BoteOficial(context: Context) {
         if (!forzar && cache != null && System.currentTimeMillis() - cache.obtenidoMs < CACHE_MS) {
             return@withContext cache
         }
-        // 1º la web oficial; 2º (solo Primitiva) una web de resultados como respaldo
+        // 1º la web oficial; 2º (solo Primitiva) primitiva.org.es; 3º el botes.json que
+        // GitHub guarda cada noche (la web oficial a veces rechaza las peticiones del móvil)
         val nuevo = intentar(tipo) { descargar(tipo) }
-            ?: if (tipo == TipoLoteria.PRIMITIVA) intentar(tipo) { descargarRespaldoPrimitiva() } else null
+            ?: (if (tipo == TipoLoteria.PRIMITIVA) intentar(tipo) { descargarRespaldoPrimitiva() } else null)
+            ?: intentar(tipo) { descargarDeGitHub(tipo) }
         if (nuevo != null) {
             prefs.edit()
                 .putString("fecha_${tipo.name}", nuevo.fechaSorteo)
@@ -128,6 +132,21 @@ class BoteOficial(context: Context) {
         return Bote(fecha, importe, System.currentTimeMillis())
     }
 
+    /**
+     * Respaldo para las 4 loterías: datos/botes.json del repositorio, que escribe cada noche
+     * la tarea de GitHub (scripts/actualizar_datos.py → guardar_botes) leyendo la API oficial.
+     * Formato: {"botes": {"BONOLOTO": {"fecha": "2026-10-20", "importe": 2800000.0}, ...}}
+     */
+    private fun descargarDeGitHub(tipo: TipoLoteria): Bote? {
+        val texto = leerUrl(URL_GITHUB, "application/json") ?: return null
+        val obj = org.json.JSONObject(texto).optJSONObject("botes")?.optJSONObject(tipo.name) ?: return null
+        val fecha = obj.optString("fecha")
+        val importe = obj.optDouble("importe", -1.0)
+        if (fecha.length != 10 || importe <= 0) return null
+        if (fecha < java.time.LocalDate.now().toString()) return null   // bote de un sorteo ya pasado
+        return Bote(fecha, importe, System.currentTimeMillis())
+    }
+
     private fun descargar(tipo: TipoLoteria): Bote? {
         val gameId = GAME_ID[tipo] ?: return null
         val conexion = URL("$URL_BASE?game_id=$gameId&num=2").openConnection() as HttpURLConnection
@@ -136,7 +155,9 @@ class BoteOficial(context: Context) {
             conexion.readTimeout = 15_000
             // La web rechaza a veces peticiones sin cabeceras de navegador
             conexion.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile")
-            conexion.setRequestProperty("Accept", "application/json")
+            conexion.setRequestProperty("Accept", "application/json, text/plain, */*")
+            conexion.setRequestProperty("Accept-Language", "es-ES,es;q=0.9")
+            conexion.setRequestProperty("Referer", "https://www.loteriasyapuestas.es/es/resultados")
             if (conexion.responseCode != 200) return null
 
             val texto = conexion.inputStream.bufferedReader().readText()
