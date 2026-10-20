@@ -80,6 +80,53 @@ class SeleccionViewModel(
 
     init {
         cargarPredicciones()
+        // Cuando termina un tramo del análisis de sorteos pasados, el líder puede cambiar
+        viewModelScope.launch {
+            var anterior: GestorPredicciones.EstadoSimulacion? = null
+            GestorPredicciones.simulacion.collect { estado ->
+                val acabo = estado == null && anterior != null
+                val avance = estado != null && estado.hechos > 0 && estado.hechos % 100 == 0 &&
+                    estado.hechos != anterior?.hechos
+                if (acabo || avance) refrescarJugadas()
+                anterior = estado
+            }
+        }
+    }
+
+    /**
+     * Vuelve a elegir, SIN recalcular nada pesado, el método que más acierta y su jugada
+     * (las combinaciones ya están guardadas). Se llama al volver a esta pantalla (p. ej. tras
+     * cambiar 10 / 100 / 1.000 en la tarjeta 🏆) y cuando avanza el análisis en segundo plano.
+     * Antes la jugada de inicio solo se calculaba al abrir la app y se quedaba desfasada.
+     */
+    fun refrescarJugadas() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val actual = _predicciones.value.toMutableMap()
+            var cambio = false
+            for (tipo in GestorPredicciones.LOTERIAS_EVALUABLES) {
+                val pred = actual[tipo] ?: continue
+                try {
+                    if (historialPredicciones.cargarHistorial(tipo.name).size < 3) continue
+                    val cantidad = if (tipo == TipoLoteria.PRIMITIVA || tipo == TipoLoteria.BONOLOTO) 6 else 5
+                    val lider = historialPredicciones.metodoLider(tipo.name, if (cantidad == 6) 3 else 2) ?: continue
+                    val metodo = metodoPorNombre(lider.first) ?: continue
+                    val combinacion = gestorPredicciones.obtenerOGenerar(tipo).analisis.combinacionesSugeridas
+                        .firstOrNull { nombreMetodo(it) == metodo.displayName } ?: continue
+                    if (metodo == pred.mejorMetodo && combinacion.numeros == pred.numerosPredichos) continue
+                    actual[tipo] = pred.copy(
+                        mejorMetodo = metodo,
+                        tasaAcierto = lider.second * 100 / cantidad,
+                        numerosPredichos = combinacion.numeros,
+                        complementarioPredicho = combinacion.complementarios.getOrNull(0),
+                        complementarioPredicho2 = combinacion.complementarios.getOrNull(1)
+                    )
+                    cambio = true
+                } catch (e: Exception) {
+                    android.util.Log.w("SeleccionVM", "No se pudo refrescar $tipo: ${e.message}")
+                }
+            }
+            if (cambio) _predicciones.value = actual
+        }
     }
 
     fun cargarPredicciones() {

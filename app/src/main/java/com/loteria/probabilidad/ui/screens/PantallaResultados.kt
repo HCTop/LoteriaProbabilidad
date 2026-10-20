@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
@@ -100,17 +101,30 @@ fun PantallaResultados(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = tipoLoteria.displayName,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "📅 ${tipoLoteria.diasSorteo}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(colorLoteria(tipoLoteria).copy(alpha = 0.14f))
+                        ) {
+                            Icon(
+                                iconoLoteria(tipoLoteria),
+                                contentDescription = null,
+                                tint = colorLoteria(tipoLoteria),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(text = tipoLoteria.displayName, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = tipoLoteria.diasSorteo,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -495,67 +509,33 @@ private fun ResultadosContent(
 private fun InfoCard(
     analisis: AnalisisProbabilidad,
     rangoSeleccionado: OpcionRangoFechas,
-    prediccionesInfo: String = "",
+    @Suppress("UNUSED_PARAMETER") prediccionesInfo: String = "",
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        shape = MaterialTheme.shapes.medium
+    // Franja discreta de "píldoras" con los datos de contexto (antes era un bloque grande de color)
+    Row(
+        modifier = modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "📊 Todos los Métodos (1 por cada uno)",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            if (prediccionesInfo.isNotEmpty()) {
-                Text(
-                    text = prediccionesInfo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Sorteos analizados: ${analisis.totalSorteos}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-            )
-            Text(
-                text = "Período: ${rangoSeleccionado.displayName}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-            )
-            // Mostrar fecha del último sorteo (actualización de datos)
-            analisis.fechaUltimoSorteo?.let { fecha ->
-                Text(
-                    text = "📅 Datos hasta: $fecha",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-            if (analisis.fechaDesde != null || analisis.fechaHasta != null) {
-                val rangoTexto = buildString {
-                    analisis.fechaDesde?.let { append("Desde: $it") }
-                    if (analisis.fechaDesde != null && analisis.fechaHasta != null) append(" | ")
-                    analisis.fechaHasta?.let { append("Hasta: $it") }
-                }
-                if (rangoTexto.isNotEmpty()) {
-                    Text(
-                        text = rangoTexto,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                    )
-                }
-            }
-        }
+        analisis.fechaUltimoSorteo?.let { PildoraInfo("📅 Datos hasta $it") }
+        PildoraInfo("${"%,d".format(analisis.totalSorteos).replace(',', '.')} sorteos")
+        if (rangoSeleccionado != OpcionRangoFechas.TODO_HISTORICO) PildoraInfo(rangoSeleccionado.displayName)
+    }
+}
+
+@Composable
+private fun PildoraInfo(texto: String) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Text(
+            texto,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 
@@ -602,7 +582,7 @@ private fun EstadisticasCard(
     tipoLoteria: TipoLoteria,
     modifier: Modifier = Modifier
 ) {
-    ElevatedCard(
+    TarjetaApp(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -896,7 +876,7 @@ private fun JugadaRecomendadaCard(
     val perfil = remember(jugada.numeros) { if (esSeisDe49) perfilCombinacion(jugada.numeros) else emptyList() }
     var abierta by remember { mutableStateOf(false) }
 
-    ElevatedCard(modifier = modifier.fillMaxWidth().clickable { abierta = true }) {
+    TarjetaApp(modifier = modifier.fillMaxWidth().clickable { abierta = true }) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -994,7 +974,7 @@ private fun JugadaRecomendadaCard(
                     }
                     // Por qué esta
                     item {
-                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                        TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Por qué esta combinación", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -1020,7 +1000,7 @@ private fun JugadaRecomendadaCard(
                     // Reintegro (Primitiva/Bonoloto)
                     if (esSeisDe49 && jugada.complementarios.isNotEmpty()) {
                         item {
-                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text(
                                         "🎲 Reintegro: ${jugada.complementarios.first()}",
@@ -1049,7 +1029,7 @@ private fun JugadaRecomendadaCard(
                     // Forma de la combinación comparada con lo que suele salir
                     if (perfil.isNotEmpty()) {
                         item {
-                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text("Forma de la combinación", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -1118,7 +1098,7 @@ private fun EvaluacionCard(
     var metodoAbierto by remember { mutableStateOf<String?>(null) }
     val verde = Color(0xFF2E7D32)
 
-    ElevatedCard(
+    TarjetaApp(
         modifier = modifier
             .fillMaxWidth()
             .then(if (mejor != null) Modifier.clickable { metodoAbierto = mejor.metodo } else Modifier)
@@ -1307,7 +1287,7 @@ private fun DetalleMetodoDialog(
 
                 // Estadísticas
                 item {
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 DatoMetodo("Premios", "${est.premios}", if (est.premios > 0) verde else null)
@@ -1613,7 +1593,7 @@ private fun SemaforoBoteCard(
     val sinBote = boteActual <= 0
     val color = if (sinBote) Color.Gray else Color(kelly.recomendacion.color)
 
-    ElevatedCard(modifier = modifier.fillMaxWidth().clickable(enabled = !sinBote) { expandido = !expandido }) {
+    TarjetaApp(modifier = modifier.fillMaxWidth().clickable(enabled = !sinBote) { expandido = !expandido }) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Semáforo
@@ -1714,7 +1694,7 @@ private fun VariasApuestasCard(
     var numApuestas by remember { mutableStateOf(5) }
     val tipoExtra = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.COMPLEMENTARIO
 
-    ElevatedCard(
+    TarjetaApp(
         modifier = modifier.fillMaxWidth().clickable {
             abierta = true
             if (resultado == null || resultado.apuestas.size != numApuestas) onGenerar(numApuestas)
@@ -1774,7 +1754,7 @@ private fun VariasApuestasCard(
                                 Text("Preparando apuestas…", style = MaterialTheme.typography.bodySmall)
                             }
                         } else {
-                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         DatoMetodo("Te cuesta", "%.2f €".format(resultado.coste).replace(",00", "").replace(".00", ""))
@@ -1873,7 +1853,7 @@ private fun FormulaAbueloCard(
     var expandido by remember { mutableStateOf(false) }
     // El semáforo del bote vive ahora en su propia tarjeta (SemaforoBoteCard)
 
-    ElevatedCard(
+    TarjetaApp(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(

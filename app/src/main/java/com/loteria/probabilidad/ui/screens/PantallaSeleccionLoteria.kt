@@ -50,6 +50,10 @@ fun PantallaSeleccionLoteria(
     val predicciones by viewModel.predicciones.collectAsState()
     val cargandoPredicciones by viewModel.cargando.collectAsState()
 
+    // Al volver a esta pantalla (p. ej. desde Primitiva tras cambiar 10/100/1.000),
+    // volver a elegir el método que más acierta y su jugada
+    LaunchedEffect(Unit) { viewModel.refrescarJugadas() }
+
     var descargando by remember { mutableStateOf(false) }
     var mensajeDescarga by remember { mutableStateOf<String?>(null) }
 
@@ -61,24 +65,19 @@ fun PantallaSeleccionLoteria(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Casino,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Lotería Probabilidad",
-                            fontWeight = FontWeight.Bold
-                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(text = "Lotería Probabilidad", style = MaterialTheme.typography.titleLarge)
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
@@ -89,41 +88,24 @@ fun PantallaSeleccionLoteria(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .verticalScroll(scrollState)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Título y descripción
-            Text(
-                text = "Selecciona una lotería",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-            
-            Text(
-                text = "Obtén las 5 combinaciones más probables basadas en el análisis histórico",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            // Disclaimer
-            DisclaimerCard()
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            // Sección: Loterías de números
-            Text(
-                text = "Loterías de números",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-            )
+            // Cabecera
+            Column(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)) {
+                Text(
+                    text = "Próximos sorteos",
+                    style = MaterialTheme.typography.headlineMedium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "La jugada del método que más acierta en cada lotería",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            TituloSeccion("Loterías de números")
 
             // Helper para crear botones con predicción
             @Composable
@@ -163,14 +145,7 @@ fun PantallaSeleccionLoteria(
             // GORDO PRIMITIVA
             BotonLoteria(TipoLoteria.GORDO_PRIMITIVA)
 
-            // Sección: Sorteos especiales
-            Text(
-                text = "Sorteos especiales",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-            )
+            TituloSeccion("Sorteos especiales", modifier = Modifier.padding(top = 12.dp))
 
             // LOTERIA NACIONAL
             BotonLoteria(TipoLoteria.LOTERIA_NACIONAL)
@@ -181,13 +156,14 @@ fun PantallaSeleccionLoteria(
             // NIÑO
             BotonLoteria(TipoLoteria.NINO)
             
-            Spacer(modifier = Modifier.height(24.dp))
-            
+            TituloSeccion("Datos", modifier = Modifier.padding(top = 12.dp))
+
             // Botón de actualización de CSV desde GitHub
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             ) {
                 Column(
@@ -195,9 +171,8 @@ fun PantallaSeleccionLoteria(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "📊 Datos Históricos",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        "Datos históricos",
+                        style = MaterialTheme.typography.titleSmall
                     )
                     
                     Text(
@@ -224,7 +199,7 @@ fun PantallaSeleccionLoteria(
                     }
                     
                     // Botón único para descargar y verificar
-                    Button(
+                    FilledTonalButton(
                         onClick = {
                             scope.launch {
                                 descargando = true
@@ -370,7 +345,7 @@ fun PantallaSeleccionLoteria(
                         if (descargando) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -378,14 +353,15 @@ fun PantallaSeleccionLoteria(
                         } else {
                             Icon(Icons.Default.CloudDownload, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("🔄 Actualizar datos históricos")
+                            Text("Actualizar ahora")
                         }
                     }
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-            
+            // Aviso legal (discreto, al final)
+            DisclaimerCard()
+
             // Botón de cerrar sesión
             TextButton(
                 onClick = {
@@ -410,4 +386,15 @@ fun PantallaSeleccionLoteria(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+/** Título de sección discreto (Material 3: etiqueta en color primario). */
+@Composable
+private fun TituloSeccion(texto: String, modifier: Modifier = Modifier) {
+    Text(
+        text = texto,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(start = 4.dp, top = 4.dp)
+    )
 }

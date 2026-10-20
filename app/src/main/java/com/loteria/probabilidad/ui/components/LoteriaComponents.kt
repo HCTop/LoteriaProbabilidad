@@ -113,7 +113,8 @@ fun LoteriaButton(
 }
 
 /**
- * Bola de lotería animada.
+ * Bola de lotería. El número se escala con el tamaño de la bola (antes era fijo y en
+ * las bolas pequeñas se cortaba). Relleno con un brillo suave arriba a la izquierda.
  */
 @Composable
 fun BolaNumerica(
@@ -121,56 +122,41 @@ fun BolaNumerica(
     tipo: TipoBola = TipoBola.PRINCIPAL,
     modifier: Modifier = Modifier
 ) {
-    val (backgroundColor, textColor, borderColor) = when (tipo) {
-        TipoBola.PRINCIPAL -> Triple(
-            Color(0xFFD4AF37),
-            Color.White,
-            Color(0xFFB8860B)
-        )
-        TipoBola.COMPLEMENTARIO -> Triple(
-            Color(0xFF7B1FA2),
-            Color.White,
-            Color(0xFF4A148C)
-        )
-        TipoBola.ESTRELLA -> Triple(
-            Color(0xFF1976D2),
-            Color.White,
-            Color(0xFF0D47A1)
-        )
-        TipoBola.REINTEGRO -> Triple(
-            Color(0xFF388E3C),
-            Color.White,
-            Color(0xFF1B5E20)
-        )
+    val (base, oscuro) = when (tipo) {
+        TipoBola.PRINCIPAL -> Color(0xFFE2B33C) to Color(0xFFB07F12)
+        TipoBola.COMPLEMENTARIO -> Color(0xFF8E5BD0) to Color(0xFF5E2FA0)
+        TipoBola.ESTRELLA -> Color(0xFF3D7BE0) to Color(0xFF1F4FA8)
+        TipoBola.REINTEGRO -> Color(0xFF34A26A) to Color(0xFF1C6E44)
     }
-
-    Box(
+    BoxWithConstraints(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(if (tipo == TipoBola.PRINCIPAL) 48.dp else 40.dp)
             .clip(CircleShape)
             .background(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        backgroundColor,
-                        borderColor
-                    )
+                // Diagonal de arriba-izquierda (más claro) a abajo-derecha (más oscuro)
+                brush = Brush.linearGradient(
+                    colors = listOf(base.copy(alpha = 0.75f).compositeOverWhite(), base, oscuro)
                 )
             )
-            .border(
-                width = 2.dp,
-                color = borderColor,
-                shape = CircleShape
-            )
     ) {
+        val lado = minOf(maxWidth, maxHeight)
         Text(
             text = numero.toString(),
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = (lado.value * 0.42f).sp,
             fontWeight = FontWeight.Bold,
-            color = textColor
+            color = Color.White,
+            maxLines = 1
         )
     }
 }
+
+/** Mezcla un color semitransparente sobre blanco (para el brillo de las bolas). */
+private fun Color.compositeOverWhite(): Color = Color(
+    red = red * alpha + (1f - alpha),
+    green = green * alpha + (1f - alpha),
+    blue = blue * alpha + (1f - alpha)
+)
 
 enum class TipoBola {
     PRINCIPAL,
@@ -402,9 +388,9 @@ fun DisclaimerCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = MaterialTheme.shapes.medium
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -413,14 +399,14 @@ fun DisclaimerCard(
             Icon(
                 imageVector = Icons.Default.Info,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(20.dp)
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Los sorteos de lotería son eventos aleatorios. Este análisis se basa en frecuencias históricas y NO garantiza resultados futuros. Juega con responsabilidad.",
+                text = "Los sorteos son aleatorios: nada garantiza resultados. Juega con responsabilidad.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1033,289 +1019,169 @@ fun LoteriaButtonConPrediccion(
     semaforoTexto: String? = null,
     semaforoColor: Long? = null
 ) {
-    val (icon, gradientColors) = when (tipoLoteria) {
-        TipoLoteria.PRIMITIVA -> Icons.Default.Casino to listOf(Color(0xFF1976D2), Color(0xFF42A5F5))
-        TipoLoteria.BONOLOTO -> Icons.Default.Loyalty to listOf(Color(0xFF388E3C), Color(0xFF66BB6A))
-        TipoLoteria.EUROMILLONES -> Icons.Default.Euro to listOf(Color(0xFFD4AF37), Color(0xFFFFE082))
-        TipoLoteria.GORDO_PRIMITIVA -> Icons.Default.EmojiEvents to listOf(Color(0xFFF57C00), Color(0xFFFFB74D))
-        TipoLoteria.LOTERIA_NACIONAL -> Icons.Default.ConfirmationNumber to listOf(Color(0xFF7B1FA2), Color(0xFFBA68C8))
-        TipoLoteria.NAVIDAD -> Icons.Default.Celebration to listOf(Color(0xFFC62828), Color(0xFFEF5350))
-        TipoLoteria.NINO -> Icons.Default.ChildCare to listOf(Color(0xFF00796B), Color(0xFF4DB6AC))
-    }
+    val acento = colorLoteria(tipoLoteria)
+    val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        // Botón principal
-        ElevatedCard(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp),
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 0.dp, bottomEnd = 0.dp),
-            elevation = CardDefaults.elevatedCardElevation(
-                defaultElevation = 6.dp,
-                pressedElevation = 2.dp
-            )
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.horizontalGradient(gradientColors)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(horizontal = 16.dp)
+    // Una sola tarjeta: cabecera (icono + nombre + días), jugada, semáforo y último sorteo.
+    Card(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // ── Cabecera ──
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(acento.copy(alpha = 0.14f))
                 ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                    Icon(iconoLoteria(tipoLoteria), contentDescription = null, tint = acento, modifier = Modifier.size(24.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tipoLoteria.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        tipoLoteria.diasSorteo,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
+                }
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "Abrir",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            when {
+                cargando -> {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(CircleShape))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Calculando la jugada…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                numerosPredichos.isNotEmpty() || ultimoSorteoNumeros.isNotEmpty() -> {
+                    // ── Jugada para el próximo sorteo ──
+                    if (numerosPredichos.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = tipoLoteria.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            "Jugada" + if (proximoDia.isNotBlank()) " · $proximoDia" else "",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CalendarToday,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            numerosPredichos.take(6).forEach {
+                                BolaNumerica(numero = it, tipo = TipoBola.PRINCIPAL, modifier = Modifier.size(34.dp))
+                            }
+                            if (complementario != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                BolaNumerica(numero = complementario, tipo = tipoComp, modifier = Modifier.size(28.dp))
+                                if (complementario2 != null) {
+                                    BolaNumerica(numero = complementario2, tipo = TipoBola.ESTRELLA, modifier = Modifier.size(28.dp))
+                                }
+                            }
+                        }
+                        if (mejorMetodo.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = tipoLoteria.diasSorteo,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.9f)
+                                "De $mejorMetodo",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                }
-            }
-        }
 
-        // Card de predicción debajo
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-            )
-        ) {
-            if (cargando) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    // ── Semáforo del bote (píldora) ──
+                    if (semaforoTexto != null && semaforoColor != null) {
+                        val c = Color(semaforoColor)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(shape = CircleShape, color = c.copy(alpha = 0.12f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(c))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(semaforoTexto, style = MaterialTheme.typography.labelMedium, color = c)
+                            }
+                        }
+                    }
+
+                    // ── Último sorteo (discreto) ──
+                    if (ultimoSorteoNumeros.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Calculando predicción...",
-                            style = MaterialTheme.typography.bodySmall,
+                            "Último sorteo" + if (ultimoSorteoFecha.isNotBlank()) " · $ultimoSorteoFecha" else "",
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-                }
-            } else if (numerosPredichos.isNotEmpty() || ultimoSorteoNumeros.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    // === SEMÁFORO DEL BOTE ===
-                    if (semaforoTexto != null && semaforoColor != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(semaforoColor))
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = semaforoTexto,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(semaforoColor)
-                            )
-                        }
-                    }
-
-                    // === ÚLTIMO SORTEO ===
-                    if (ultimoSorteoNumeros.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "🏆",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Último ($ultimoSorteoFecha):",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            ultimoSorteoNumeros.take(6).forEach { numero ->
-                                BolaNumerica(
-                                    numero = numero,
-                                    tipo = TipoBola.PRINCIPAL,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
+                            ultimoSorteoNumeros.take(6).forEach { n ->
+                                // Los que acertó el mejor método, resaltados
+                                val acertado = n in numerosAcertados
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (acertado) MaterialTheme.colorScheme.tertiary
+                                            else MaterialTheme.colorScheme.surfaceContainerHigh
+                                        )
+                                ) {
+                                    Text(
+                                        "$n",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (acertado) MaterialTheme.colorScheme.onTertiary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                             if (ultimoSorteoComp1 != null) {
-                                Text("+", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                BolaNumerica(
-                                    numero = ultimoSorteoComp1,
-                                    tipo = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                BolaNumerica(numero = ultimoSorteoComp1, tipo = tipoComp, modifier = Modifier.size(22.dp))
                                 if (ultimoSorteoComp2 != null) {
-                                    BolaNumerica(
-                                        numero = ultimoSorteoComp2,
-                                        tipo = TipoBola.ESTRELLA,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    BolaNumerica(numero = ultimoSorteoComp2, tipo = TipoBola.ESTRELLA, modifier = Modifier.size(22.dp))
                                 }
                             }
                         }
-
-                        // === MEJOR MÉTODO EN ÚLTIMO SORTEO ===
                         if (aciertosDelMejorMetodo > 0 && metodoMejorAcierto.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "✅",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "$metodoMejorAcierto acertó $aciertosDelMejorMetodo:",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF4CAF50)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                numerosAcertados.forEach { numero ->
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = Color(0xFF4CAF50),
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = "$numero",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.White
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-
-                    // === PREDICCIÓN PRÓXIMO SORTEO ===
-                    if (numerosPredichos.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "🎯",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Próximo ($proximoDia):",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = mejorMetodo,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                "✓ $metodoMejorAcierto acertó $aciertosDelMejorMetodo",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.tertiary
                             )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            numerosPredichos.take(6).forEach { numero ->
-                                BolaNumerica(
-                                    numero = numero,
-                                    tipo = TipoBola.PRINCIPAL,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-
-                            if (complementario != null) {
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("+", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                BolaNumerica(
-                                    numero = complementario,
-                                    tipo = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                if (complementario2 != null) {
-                                    BolaNumerica(
-                                        numero = complementario2,
-                                        tipo = TipoBola.ESTRELLA,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
                         }
                     }
                 }
-            } else {
-                // Sin predicción disponible
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+
+                else -> {
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Toca para ver predicciones",
+                        "Toca para ver la jugada",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
