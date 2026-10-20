@@ -144,49 +144,9 @@ class ObtenerCombinacionesUseCase(
             }
         }
 
-        // Reasignar complementarios variados para que no todas las combinaciones
-        // tengan el mismo reintegro/estrella/clave (el bug de siempre-0)
-        // Semilla determinista: incluye hash de las combinaciones para que cambie tras entrenamiento
-        val combHash = todasCombinaciones.sumOf { it.numeros.hashCode().toLong() }
-        val semillaComp = tipoLoteria.name.hashCode().toLong() * 31 + historicoFiltrado.size.toLong() + combHash
-        val rndComp = Random(semillaComp)
-        val combinacionesFinales = when (tipoLoteria) {
-            // Primitiva/Bonoloto: cada método ya trae SU reintegro, calculado con su mismo
-            // criterio (CalculadorProbabilidad.reintegrosSegunMetodo). Antes aquí se barajaban
-            // al azar y el reintegro de la jugada no tenía nada que ver con el método.
-            TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> todasCombinaciones
-            TipoLoteria.EUROMILLONES -> {
-                // Generar pares de estrellas variados
-                val todasEstrellas = (1..12).shuffled(rndComp)
-                todasCombinaciones.mapIndexed { index, comb ->
-                    val offset = (index * 2) % todasEstrellas.size
-                    val e1 = todasEstrellas[offset]
-                    val e2 = todasEstrellas[(offset + 1) % todasEstrellas.size]
-                    val estrellas = listOf(e1, e2).distinct().sorted().let {
-                        if (it.size < 2) listOf(e1, (1..12).first { n -> n != e1 }).sorted() else it
-                    }
-                    comb.copy(
-                        complementarios = estrellas,
-                        explicacion = comb.explicacion.replace(
-                            Regex("\\| ⭐[\\d,]+"), "| ⭐${estrellas.joinToString(",")}"
-                        )
-                    )
-                }
-            }
-            TipoLoteria.GORDO_PRIMITIVA -> {
-                val clavesBarajadas = (0..9).shuffled(rndComp)
-                todasCombinaciones.mapIndexed { index, comb ->
-                    val nuevaClave = clavesBarajadas[index % clavesBarajadas.size]
-                    comb.copy(
-                        complementarios = listOf(nuevaClave),
-                        explicacion = comb.explicacion.replace(
-                            Regex("\\| 🔑K:\\d+"), "| 🔑K:$nuevaClave"
-                        )
-                    )
-                }
-            }
-            else -> todasCombinaciones // Nacional, Navidad, Niño no tienen complementarios
-        }
+        // Cada método trae ya su reintegro / estrellas / clave, calculados con su mismo criterio
+        // (CalculadorProbabilidad.complementosSegunMetodo). Antes aquí se barajaban al azar.
+        val combinacionesFinales = todasCombinaciones
 
         return (analisisBase ?: throw Exception("No se pudieron generar combinaciones")).copy(
             combinacionesSugeridas = combinacionesFinales,

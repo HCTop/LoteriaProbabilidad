@@ -34,7 +34,7 @@ class BoteOficial(context: Context) {
         private const val CACHE_MS = 3 * 60 * 60 * 1000L
         private const val URL_BASE = "https://www.loteriasyapuestas.es/servicios/proximosv3"
 
-        /** Código de juego en la API oficial. Solo LAPR está comprobado (oct-2026). */
+        /** Código de juego en la API oficial (los 4 comprobados en oct-2026). */
         private val GAME_ID = mapOf(
             TipoLoteria.PRIMITIVA to "LAPR",
             TipoLoteria.BONOLOTO to "BONO",
@@ -150,6 +150,9 @@ class BoteOficial(context: Context) {
                 if (importe <= 0) continue
                 val fecha = s.optString("fecha").take(10)          // "2026-10-19 00:00:00"
                 if (fecha.length != 10) continue
+                // La API puede devolver primero un sorteo ya celebrado (pasa con El Gordo):
+                // ese bote no es el del próximo sorteo
+                if (fecha < java.time.LocalDate.now().toString()) continue
                 return Bote(fecha, importe, System.currentTimeMillis())
             }
             return null

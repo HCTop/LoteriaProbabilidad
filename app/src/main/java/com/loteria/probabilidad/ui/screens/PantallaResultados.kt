@@ -869,11 +869,12 @@ private fun JugadaRecomendadaCard(
             .mapNotNull { est -> combinaciones.firstOrNull { metodoDe(it) == est.metodo }?.let { est to it } }
     }
     val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
-    val esSeisDe49 = tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO
     // Motivo del reintegro: lo escribe el calculador en la explicación ("🎲 Reintegro 3: ...")
-    val motivoReintegro = jugada.explicacion.lineSequence()
-        .firstOrNull { it.trim().startsWith("🎲 Reintegro") }?.trim()
-    val perfil = remember(jugada.numeros) { if (esSeisDe49) perfilCombinacion(jugada.numeros) else emptyList() }
+    // Motivo del complemento: lo escribe el calculador ("🎲 Reintegro 3: …", "⭐ Estrellas 2 y 9: …", "🔑 Clave 4: …")
+    val motivoReintegro = jugada.explicacion.lineSequence().map { it.trim() }
+        .firstOrNull { it.startsWith("🎲 Reintegro") || it.startsWith("⭐ Estrellas") || it.startsWith("🔑 Clave") }
+    val perfil = remember(jugada.numeros) { perfilCombinacion(jugada.numeros, tipoLoteria) }
+    val comp = complementoDe(tipoLoteria)
     var abierta by remember { mutableStateOf(false) }
 
     TarjetaApp(modifier = modifier.fillMaxWidth().clickable { abierta = true }) {
@@ -997,13 +998,13 @@ private fun JugadaRecomendadaCard(
                             }
                         }
                     }
-                    // Reintegro (Primitiva/Bonoloto)
-                    if (esSeisDe49 && jugada.complementarios.isNotEmpty()) {
+                    // Reintegro / estrellas / clave
+                    if (comp != null && jugada.complementarios.isNotEmpty()) {
                         item {
                             TarjetaApp(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text(
-                                        "🎲 Reintegro: ${jugada.complementarios.first()}",
+                                        "${comp.icono} ${comp.titulo}: ${jugada.complementarios.joinToString(" y ")}",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -1011,14 +1012,12 @@ private fun JugadaRecomendadaCard(
                                     Text(
                                         motivoReintegro?.substringAfter(": ", "")?.replaceFirstChar { it.uppercase() }
                                             ?.let { "$it. Sigue el mismo criterio que los números de $metodo." }
-                                            ?: "Esta jugada se guardó antes de que el reintegro siguiera el criterio del método.",
+                                            ?: "Esta jugada se guardó antes de que ${comp.articulo} siguiera el criterio del método.",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        "Cualquier reintegro tiene un 10 % de salir. Si lo aciertas recuperas lo apostado, " +
-                                            "y con los 6 números es lo que da el bote especial. " +
-                                            "Solo se puede elegir comprando por internet; en el boleto de papel lo pone la máquina.",
+                                        comp.nota,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1185,6 +1184,7 @@ private fun EvaluacionCard(
             historialEvaluado = historialEvaluado,
             ranking = ranking,
             minPremio = minPremio,
+            complemento = complementoDe(tipoLoteria),
             prediccionesInfo = prediccionesInfo,
             progresoRelleno = progresoRelleno,
             onRellenarHistorial = onRellenarHistorial,
@@ -1245,6 +1245,7 @@ private fun DetalleMetodoDialog(
     historialEvaluado: List<HistorialPredicciones.EntradaHistorial>,
     ranking: List<EstadisticaMetodo>,
     minPremio: Int,
+    complemento: Complemento?,
     prediccionesInfo: String,
     progresoRelleno: GestorPredicciones.EstadoSimulacion?,
     onRellenarHistorial: (Int) -> Unit,
@@ -1303,12 +1304,12 @@ private fun DetalleMetodoDialog(
                                 fontFamily = FontFamily.Monospace
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            // Reintegro (Primitiva/Bonoloto): cuántas veces acertó; lo normal es 1 de cada 10
-                            if (minPremio == 3 && est.conComp > 0) {
+                            // Reintegro / estrellas / clave: cuántas veces acertó frente a lo normal
+                            if (complemento != null && est.conComp > 0) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    "🎲 Reintegros acertados: ${est.aciertosComp} de ${est.conComp} " +
-                                        "(lo normal, unos ${"%.0f".format(est.conComp / 10.0)})",
+                                    "${complemento.icono} ${complemento.acertados}: ${est.aciertosComp} de ${est.conComp} " +
+                                        "(lo normal, unos ${"%.0f".format(est.conComp * complemento.probAcierto)})",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -1366,14 +1367,15 @@ private fun DetalleMetodoDialog(
                                                 pop()
                                             } else append(n.toString().padStart(2, '0'))
                                         }
-                                        // Reintegro que llevaba (Primitiva/Bonoloto), en verde si acertó
-                                        if (minPremio == 3) eval.complementariosPredichos.firstOrNull()?.let { r ->
-                                            append("   R ")
+                                        // Reintegro / estrellas / clave que llevaba, en verde si acertó
+                                        if (complemento != null && eval.complementariosPredichos.isNotEmpty()) {
+                                            val r = eval.complementariosPredichos.joinToString(",")
+                                            append("   ${complemento.letra} ")
                                             if (eval.aciertosComplementarios > 0) {
                                                 pushStyle(androidx.compose.ui.text.SpanStyle(color = verde, fontWeight = FontWeight.Bold))
                                                 append("$r ✓")
                                                 pop()
-                                            } else append("$r")
+                                            } else append(r)
                                         }
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
@@ -1469,25 +1471,83 @@ private data class RasgoPerfil(val texto: String, val cumple: Boolean)
  * Forma de una combinación de 6 números (1-49) frente a lo que más sale.
  * Porcentajes teóricos (combinatoria), que el historial de 4.201 sorteos confirma.
  */
-private fun perfilCombinacion(numeros: List<Int>): List<RasgoPerfil> {
-    if (numeros.size != 6) return emptyList()
+private fun perfilCombinacion(numeros: List<Int>, tipo: TipoLoteria): List<RasgoPerfil> {
+    val maxNum = when (tipo) {
+        TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> 49
+        TipoLoteria.EUROMILLONES -> 50
+        TipoLoteria.GORDO_PRIMITIVA -> 54
+        else -> return emptyList()
+    }
+    val k = numeros.size
+    if (k !in 5..6) return emptyList()
+    val forma = com.loteria.probabilidad.domain.calculator.FormaTipica
     val n = numeros.sorted()
     val suma = n.sum()
+    val rSuma = forma.rangoSuma(maxNum, k)
     val impares = n.count { it % 2 == 1 }
-    val bajos = n.count { it <= 24 }
-    val seguidos = n.zipWithNext().count { (a, b) -> b == a + 1 }
-    val decenas = n.map { it / 10 }.distinct().size
+    val rImp = forma.rangoImpares(k)
+    val bajoMax = forma.limiteBajo(maxNum)
+    val bajos = n.count { it <= bajoMax }
+    val seguidos = forma.seguidos(n)
+    val decenas = forma.decenas(n)
+    val es649 = k == 6
     return listOf(
-        RasgoPerfil("Suma $suma (el 64 % de los sorteos suma entre 120 y 180)", suma in 120..180),
-        RasgoPerfil("$impares impares y ${6 - impares} pares (lo normal: 2, 3 o 4 impares, el 81 %)", impares in 2..4),
-        RasgoPerfil("$bajos bajos (1-24) y ${6 - bajos} altos (lo normal: 2, 3 o 4 bajos, el 81 %)", bajos in 2..4),
         RasgoPerfil(
+            "Suma $suma (lo normal: entre ${rSuma.first} y ${rSuma.last}" + (if (es649) ", el 64 %)" else ", 2 de cada 3)"),
+            suma in rSuma
+        ),
+        RasgoPerfil(
+            "$impares impares y ${k - impares} pares (lo normal: ${rImp.joinToString(", ")} impares" +
+                (if (es649) ", el 81 %)" else ", el 65 %)"),
+            impares in rImp
+        ),
+        RasgoPerfil(
+            "$bajos bajos (1-$bajoMax) y ${k - bajos} altos (lo normal: ${forma.rangoBajos(k).joinToString(", ")} bajos)",
+            bajos in forma.rangoBajos(k)
+        ),
+        if (es649) RasgoPerfil(
             if (seguidos > 0) "Tiene $seguidos pareja${if (seguidos > 1) "s" else ""} de números seguidos (pasa en la mitad de los sorteos)"
             else "Sin números seguidos (pasa en la mitad de los sorteos)",
             seguidos <= 1
+        ) else RasgoPerfil(
+            if (seguidos > 0) "Tiene $seguidos pareja${if (seguidos > 1) "s" else ""} de números seguidos (lo normal con 5 bolas es ninguna, 2 de cada 3)"
+            else "Sin números seguidos (lo normal con 5 bolas, 2 de cada 3)",
+            seguidos == 0
         ),
-        RasgoPerfil("Números en $decenas decenas distintas (lo normal: 3, 4 o 5, el 98 %)", decenas in 3..5)
+        RasgoPerfil("Números en $decenas decenas distintas (lo normal: 3, 4 o 5)", decenas in 3..5)
     )
+}
+
+/** Textos del complemento de cada lotería (reintegro, estrellas o número clave). */
+private data class Complemento(
+    val icono: String,
+    val titulo: String,
+    val articulo: String,
+    val acertados: String,
+    val letra: String,
+    /** Probabilidad de acertar al menos uno en un sorteo (para "lo normal"). */
+    val probAcierto: Double,
+    val nota: String
+)
+
+private fun complementoDe(tipo: TipoLoteria): Complemento? = when (tipo) {
+    TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO -> Complemento(
+        "🎲", "Reintegro", "el reintegro", "Reintegros acertados", "R", 0.10,
+        "Cualquier reintegro tiene un 10 % de salir. Si lo aciertas recuperas lo apostado" +
+            (if (tipo == TipoLoteria.PRIMITIVA) ", y con los 6 números es lo que da el bote especial" else "") +
+            ". Solo se puede elegir comprando por internet; en el boleto de papel lo pone la máquina."
+    )
+    TipoLoteria.EUROMILLONES -> Complemento(
+        "⭐", "Estrellas", "las estrellas", "Sorteos con alguna estrella acertada", "★", 21.0 / 66.0,
+        "Las estrellas las eliges tú siempre. Acertar al menos una pasa en 1 de cada 3 sorteos; " +
+            "con números acertados, las estrellas suben la categoría del premio."
+    )
+    TipoLoteria.GORDO_PRIMITIVA -> Complemento(
+        "🔑", "Número clave", "el número clave", "Claves acertadas", "K", 0.10,
+        "El número clave (0-9) lo eliges tú y tiene un 10 % de salir. Acertarlo solo ya devuelve " +
+            "lo apostado, y con los 5 números es lo que da el primer premio."
+    )
+    else -> null
 }
 
 /** Estadística de un método a lo largo del historial. */

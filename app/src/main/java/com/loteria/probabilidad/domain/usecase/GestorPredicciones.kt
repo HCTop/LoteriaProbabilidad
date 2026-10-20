@@ -85,7 +85,7 @@ class GestorPredicciones(
          */
         private const val VERSION_METODOS = 2
         /** Subir para rehacer solo las predicciones pendientes del próximo sorteo. */
-        private const val VERSION_REINTEGRO = 1
+        private const val VERSION_REINTEGRO = 2
 
         fun migrarSiHaceFalta(context: Context) {
             val app = context.applicationContext
@@ -93,10 +93,22 @@ class GestorPredicciones(
             val historial = HistorialPredicciones(app)
             // Reintegro por método (v1): rehacer SOLO las predicciones del próximo sorteo
             // (aún no se ha celebrado, así que no hay look-ahead). El historial se conserva.
-            if (prefs.getInt("version_reintegro", 0) < VERSION_REINTEGRO) {
+            val versionComp = prefs.getInt("version_reintegro", 0)
+            if (versionComp < 1) {
                 for (tipo in listOf(TipoLoteria.PRIMITIVA, TipoLoteria.BONOLOTO)) {
                     historial.eliminarPredicciones(tipo.name, historial.proximoSorteo(tipo.name).toString())
                 }
+            }
+            // v2: estrellas (Euromillones) y clave (Gordo) por método + Perfil típico de 5 números.
+            // Sus simulados se hicieron con estrellas/clave al azar: se borran y
+            // SimulacionHistoricaWorker los rehace solo. Los reales se conservan.
+            if (versionComp < 2) {
+                for (tipo in listOf(TipoLoteria.EUROMILLONES, TipoLoteria.GORDO_PRIMITIVA)) {
+                    historial.borrarSimulados(tipo.name)
+                    historial.eliminarPredicciones(tipo.name, historial.proximoSorteo(tipo.name).toString())
+                }
+            }
+            if (versionComp < VERSION_REINTEGRO) {
                 prefs.edit().putInt("version_reintegro", VERSION_REINTEGRO).apply()
             }
             if (prefs.getInt("version_metodos", 1) >= VERSION_METODOS) return

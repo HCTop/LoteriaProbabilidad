@@ -25,6 +25,8 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     companion object {
         /** Primer sorteo de La Primitiva/Bonoloto con reintegro real (antes el CSV trae 0). */
         const val INICIO_REINTEGRO = "1991-06-20"
+        /** Desde este sorteo Euromillones tiene 12 estrellas (antes 9, 10 u 11). */
+        const val INICIO_12_ESTRELLAS = "2016-09-27"
     }
 
     // Motor de IA con aprendizaje persistente
@@ -157,7 +159,9 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             (0..9).shuffled(rnd)
         }
         // Reintegros ordenados con el MISMO criterio que el método (fríos → el menos salido, etc.)
-        val reintegrosMetodo = reintegrosSegunMetodo(metodo, historicoReintegro.map { it.reintegro }, reintegrosPredichos)
+        val reintegrosMetodo = complementosSegunMetodo(
+            metodo, historicoReintegro.map { listOf(it.reintegro) }, 0..9, reintegrosPredichos
+        )
         
         // Generar combinaciones según el método
         val combinacionesBase = when (metodo) {
@@ -299,7 +303,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
 
         // MEJORA 10: Predicción inteligente de estrellas
         val estrellasPredichas = if (historico.isNotEmpty()) {
-            motorIA.predecirEstrellas(historico, numCombinaciones * 2).map { it.numero }
+            motorIA.predecirEstrellas(historico.filter { it.fecha >= INICIO_12_ESTRELLAS }, 12).map { it.numero }
         } else {
             (1..12).shuffled(rnd).take(numCombinaciones * 2)
         }
@@ -362,24 +366,26 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         }
 
         // MEJORA 10: Añadir estrellas inteligentes DIFERENTES a cada combinación
+        // Estrellas con el criterio del método. Solo sorteos con 12 estrellas (desde 27-09-2016;
+        // antes había 9, 10 u 11). Si la 2ª estrella del CSV viene rota (siempre 1, fallo antiguo
+        // del scraper), se usa solo la 1ª en lugar de ese dato inventado.
+        val sorteosEstrellas = historico.filter { it.fecha >= INICIO_12_ESTRELLAS && it.estrellas.isNotEmpty() }
+        val segundaRota = sorteosEstrellas.size >= 50 && sorteosEstrellas.take(50).all { it.estrellas.getOrNull(1) == 1 }
+        val estrellasMetodo = complementosSegunMetodo(
+            metodo,
+            sorteosEstrellas.map { if (segundaRota) it.estrellas.take(1) else it.estrellas },
+            1..12,
+            estrellasPredichas
+        )
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            // Usar estrellas predichas con rotación
-            val offset = index * 2
-            val estrella1 = estrellasPredichas.getOrElse(offset % estrellasPredichas.size) { (1..12).randomDet() }
-            val estrella2 = estrellasPredichas.getOrElse((offset + 1) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.randomDet() }
-            val estrellas = listOf(estrella1, estrella2).distinct().sorted()
-
-            // Si son iguales, tomar la siguiente disponible
-            val estrellasFinales = if (estrellas.size == 1) {
-                val siguiente = estrellasPredichas.getOrElse((offset + 2) % estrellasPredichas.size) { (1..12).filter { it != estrella1 }.randomDet() }
-                listOf(estrella1, siguiente).sorted()
-            } else {
-                estrellas
-            }
-
+            // 1ª combinación → las 2 primeras de la lista del método; 2ª → las 2 siguientes…
+            val a = estrellasMetodo[(2 * index) % estrellasMetodo.size]
+            val b = estrellasMetodo[(2 * index + 1) % estrellasMetodo.size]
+            val par = listOf(a, b).sortedBy { it.first }
             combinacion.copy(
-                complementarios = estrellasFinales,
-                explicacion = "${combinacion.explicacion} | ⭐${estrellasFinales.joinToString(",")}"
+                complementarios = par.map { it.first },
+                explicacion = "${combinacion.explicacion}\n⭐ Estrellas ${par[0].first} y ${par[1].first}: " +
+                    "${a.second}; la otra, ${b.second}"
             )
         }
 
@@ -423,7 +429,7 @@ class CalculadorProbabilidad(private val context: Context? = null) {
 
         // MEJORA 10: Predicción inteligente de número clave
         val clavesPredichas = if (historico.isNotEmpty()) {
-            motorIA.predecirNumeroClave(historico, numCombinaciones).map { it.numero }
+            motorIA.predecirNumeroClave(historico, 10).map { it.numero }
         } else {
             (0..9).shuffled(rnd).take(numCombinaciones)
         }
@@ -486,13 +492,15 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         }
 
         // MEJORA 10: Añadir número clave inteligente DIFERENTE a cada combinación
+        // Número clave con el criterio del método
+        val clavesMetodo = complementosSegunMetodo(
+            metodo, historico.map { listOf(it.numeroClave) }, 0..9, clavesPredichas
+        )
         val combinaciones = combinacionesBase.mapIndexed { index, combinacion ->
-            val numeroClave = clavesPredichas.getOrElse(index % clavesPredichas.size) {
-                (0..9).randomDet()
-            }
+            val (clave, motivo) = clavesMetodo[index % clavesMetodo.size]
             combinacion.copy(
-                complementarios = listOf(numeroClave),
-                explicacion = "${combinacion.explicacion} | 🔑K:$numeroClave"
+                complementarios = listOf(clave),
+                explicacion = "${combinacion.explicacion}\n🔑 Clave $clave: $motivo"
             )
         }
 
@@ -962,33 +970,36 @@ class CalculadorProbabilidad(private val context: Context? = null) {
         cantidad: Int,
         numCombinaciones: Int
     ): List<CombinacionSugerida> {
-        if (maxNumero != 49 || cantidad != 6 || historico.isEmpty()) {
+        // 6/49 (Primitiva, Bonoloto) y 5 números (Euromillones, Gordo). Otras: = Calientes 50.
+        if (cantidad !in 5..6 || historico.isEmpty()) {
             return generarCalientes(historico, maxNumero, cantidad, numCombinaciones)
         }
-        val reciente = contarFrecuencias(historico.take(50).flatten(), 1..49)
-        val total = contarFrecuencias(historico.flatten(), 1..49)
+        val reciente = contarFrecuencias(historico.take(50).flatten(), 1..maxNumero)
+        val total = contarFrecuencias(historico.flatten(), 1..maxNumero)
         val porCalor = compareByDescending<Int> { reciente[it] ?: 0 }
             .thenByDescending { total[it] ?: 0 }.thenBy { it }
         val ultimo = historico.first().toSet()
-        val pool = (1..49).filter { it !in ultimo }.sortedWith(porCalor).take(15)
-
-        fun formaTipica(c: List<Int>): Boolean {
-            val s = c.sorted()
-            val seguidos = s.zipWithNext().count { (a, b) -> b == a + 1 }
-            return s.sum() in 120..180 && s.count { it % 2 == 1 } in 2..4 &&
-                s.count { it <= 24 } in 2..4 && seguidos == 1 &&
-                s.map { it / 10 }.distinct().size in 3..5
-        }
+        // Sin repetir más números del último sorteo que el que se elige a propósito (6/49)
+        val pool = (1..maxNumero).filter { it !in ultimo }.sortedWith(porCalor).take(15)
         fun puntos(c: List<Int>) = c.sumOf { reciente[it] ?: 0 } + 1.5 * c.count { it > 31 }
 
-        // Todas las candidatas válidas: 6 del último × C(15,5) = 18.018 combinaciones como mucho
+        // 6/49: 1 número del último sorteo (más de la mitad de los sorteos repite alguno) + 5 del pool.
+        // 5 números: los 5 del pool (con 5 bolas lo normal es NO repetir del sorteo anterior).
+        val fijos: List<Int?> = if (cantidad == 6) ultimo.toList() else listOf(null)
+        val resto = cantidad - (if (cantidad == 6) 1 else 0)
         val validas = mutableListOf<Pair<List<Int>, Double>>()
         val p = pool
-        for (r in ultimo) for (a in 0 until p.size) for (b in a + 1 until p.size)
-            for (c in b + 1 until p.size) for (d in c + 1 until p.size) for (e in d + 1 until p.size) {
-                val cand = listOf(r, p[a], p[b], p[c], p[d], p[e])
-                if (formaTipica(cand)) validas.add(cand.sorted() to puntos(cand))
+        fun recorrer(desde: Int, actual: MutableList<Int>, fijo: Int?) {
+            if (actual.size == resto) {
+                val cand = (if (fijo != null) actual + fijo else actual.toList()).sorted()
+                if (FormaTipica.cumple(cand, maxNumero)) validas.add(cand to puntos(cand))
+                return
             }
+            for (x in desde until p.size) {
+                actual.add(p[x]); recorrer(x + 1, actual, fijo); actual.removeAt(actual.lastIndex)
+            }
+        }
+        for (f in fijos) recorrer(0, mutableListOf(), f)
         if (validas.isEmpty()) return generarCalientes(historico, maxNumero, cantidad, numCombinaciones)
         validas.sortWith(compareByDescending<Pair<List<Int>, Double>> { it.second }
             .thenBy { it.first.joinToString(",") { n -> n.toString().padStart(2, '0') } })
@@ -1000,13 +1011,14 @@ class CalculadorProbabilidad(private val context: Context? = null) {
             if (elegidas.all { (it intersect cand.toSet()).size <= 2 }) elegidas.add(cand)
         }
         return elegidas.map { comb ->
-            val repetido = comb.first { it in ultimo }
+            val repetido = comb.firstOrNull { it in ultimo }
             val altos = comb.count { it > 31 }
             CombinacionSugerida(
                 numeros = comb,
                 probabilidadRelativa = 50.0,
-                explicacion = "Forma típica · suma ${comb.sum()} · repite el $repetido del último sorteo · " +
-                    "$altos números altos (>31)"
+                explicacion = "Forma típica · suma ${comb.sum()}" +
+                    (if (repetido != null) " · repite el $repetido del último sorteo" else "") +
+                    " · $altos números altos (>31)"
             )
         }
     }
@@ -1049,40 +1061,42 @@ class CalculadorProbabilidad(private val context: Context? = null) {
     }
 
     /**
-     * Los 10 reintegros (0-9) ordenados con el criterio del método, con el motivo de cada uno.
-     * [reintegros] va del sorteo más reciente al más antiguo y solo trae datos reales.
-     * Todos tienen un 10 % de salir: esto solo hace que el reintegro siga la misma lógica
-     * que los números del método, y que el móvil lo decida solo.
+     * Valores del complemento (reintegro 0-9, estrellas 1-12 o clave 0-9) ordenados con el
+     * criterio del método, con el motivo de cada uno. Así el complemento sigue la misma lógica
+     * que los números (fríos → el menos salido, calientes → últimos 50, debidos → el más atrasado…).
+     * [porSorteo]: valores de cada sorteo, del más reciente al más antiguo, solo datos reales.
+     * Ninguno es "mejor": todos tienen la misma probabilidad; el móvil solo lo decide solo.
      */
-    private fun reintegrosSegunMetodo(
+    private fun complementosSegunMetodo(
         metodo: MetodoCalculo,
-        reintegros: List<Int>,
+        porSorteo: List<List<Int>>,
+        rango: IntRange,
         prediccionIA: List<Int>
     ): List<Pair<Int, String>> {
-        if (reintegros.isEmpty()) return (0..9).shuffled(rnd).map { it to "elegido al azar (no hay datos)" }
-        val total = contarFrecuencias(reintegros, 0..9)
-        val recientes = contarFrecuencias(reintegros.take(50), 0..9)
-        val hueco = (0..9).associateWith { r -> reintegros.indexOf(r).let { if (it < 0) reintegros.size else it } }
-        val n = reintegros.size
-        fun veces(r: Int) = "${total[r] ?: 0} veces en $n sorteos"
+        if (porSorteo.isEmpty()) return rango.shuffled(rnd).map { it to "elegido al azar (no hay datos)" }
+        val total = contarFrecuencias(porSorteo.flatten(), rango)
+        val recientes = contarFrecuencias(porSorteo.take(50).flatten(), rango)
+        val hueco = rango.associateWith { v -> porSorteo.indexOfFirst { v in it }.let { if (it < 0) porSorteo.size else it } }
+        val n = porSorteo.size
+        fun veces(v: Int) = "${total[v] ?: 0} veces en $n sorteos"
         return when (metodo) {
             MetodoCalculo.FRECUENCIAS ->
-                (0..9).sortedWith(compareByDescending<Int> { total[it] ?: 0 }.thenBy { it })
+                rango.sortedWith(compareByDescending<Int> { total[it] ?: 0 }.thenBy { it })
                     .map { it to "el que más ha salido (${veces(it)})" }
             MetodoCalculo.NUMEROS_FRIOS ->
-                (0..9).sortedWith(compareBy<Int> { total[it] ?: 0 }.thenBy { it })
+                rango.sortedWith(compareBy<Int> { total[it] ?: 0 }.thenBy { it })
                     .map { it to "el que menos ha salido (${veces(it)})" }
             MetodoCalculo.CALIENTES_50, MetodoCalculo.PERFIL_TIPICO ->
-                (0..9).sortedWith(compareByDescending<Int> { recientes[it] ?: 0 }
+                rango.sortedWith(compareByDescending<Int> { recientes[it] ?: 0 }
                     .thenByDescending { total[it] ?: 0 }.thenBy { it })
                     .map { it to "el más caliente: ${recientes[it] ?: 0} veces en los últimos 50 sorteos" }
             MetodoCalculo.DEBIDOS ->
-                (0..9).sortedWith(compareByDescending<Int> { hueco[it] ?: 0 }.thenBy { it })
+                rango.sortedWith(compareByDescending<Int> { hueco[it] ?: 0 }.thenBy { it })
                     .map { it to "el más atrasado: lleva ${hueco[it]} sorteos sin salir" }
             MetodoCalculo.ALEATORIO_PURO ->
-                (0..9).shuffled(rnd).map { it to "elegido al azar" }
+                rango.shuffled(rnd).map { it to "elegido al azar" }
             else -> {
-                val orden = (prediccionIA + (0..9)).distinct().filter { it in 0..9 }
+                val orden = (prediccionIA + rango).distinct().filter { it in rango }
                 orden.map { it to "el que propone la IA (${veces(it)})" }
             }
         }
