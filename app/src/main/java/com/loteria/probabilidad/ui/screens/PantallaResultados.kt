@@ -882,6 +882,12 @@ private fun JugadaRecomendadaCard(
         ?: combinaciones.firstOrNull { metodoDe(it) == MetodoCalculo.ENSEMBLE_VOTING.displayName }
         ?: combinaciones.first()
     val metodo = metodoDe(jugada)
+    // Métodos empatados a premios con el líder (aparte de él), con su combinación guardada
+    val empatados = remember(ranking, combinaciones) {
+        if (lider == null) emptyList() else ranking.drop(1)
+            .filter { it.premios == lider.premios }
+            .mapNotNull { est -> combinaciones.firstOrNull { metodoDe(it) == est.metodo }?.let { est to it } }
+    }
     val tipoComp = if (tipoLoteria == TipoLoteria.EUROMILLONES) TipoBola.ESTRELLA else TipoBola.REINTEGRO
     val esSeisDe49 = tipoLoteria == TipoLoteria.PRIMITIVA || tipoLoteria == TipoLoteria.BONOLOTO
     // Motivo del reintegro: lo escribe el calculador en la explicación ("🎲 Reintegro 3: ...")
@@ -924,6 +930,36 @@ private fun JugadaRecomendadaCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // Empate a premios: también sus jugadas, con el motivo del desempate
+            if (lider != null && empatados.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "🤝 Empate a ${lider.premios} premios",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                empatados.take(3).forEach { (est, comb) ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        comb.numeros.sorted().forEach {
+                            BolaNumerica(numero = it, tipo = TipoBola.PRINCIPAL, modifier = Modifier.size(30.dp))
+                        }
+                        comb.complementarios.forEach {
+                            BolaNumerica(numero = it, tipo = tipoComp, modifier = Modifier.size(26.dp))
+                        }
+                    }
+                    Text(
+                        "De ${est.metodo} · ${motivoDesempate(lider, est, minPremio)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 
@@ -1108,6 +1144,15 @@ private fun EvaluacionCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(mejor.metodo, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        val empatados = ranking.drop(1).filter { it.premios == mejor.premios }
+                        if (empatados.isNotEmpty()) {
+                            Text(
+                                "🤝 Empatado a premios con " + empatados.joinToString(", ") { it.metodo } +
+                                    " · " + motivoDesempate(mejor, empatados.first(), minPremio),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Icon(Icons.Default.ExpandMore, contentDescription = "Ver detalle")
                 }
@@ -1416,6 +1461,27 @@ private fun DetalleMetodoDialog(
     }
 }
 
+/**
+ * Por qué [ganador] va delante de [otro] cuando tienen los mismos premios
+ * (primer criterio de [ordenRanking] en el que se diferencian).
+ */
+private fun motivoDesempate(ganador: EstadisticaMetodo, otro: EstadisticaMetodo, minPremio: Int): String {
+    for (k in 6 downTo minPremio) {
+        val a = ganador.distribucion[k] ?: 0
+        val b = otro.distribucion[k] ?: 0
+        if (a != b) return "desempate: más veces con $k aciertos ($a frente a $b)"
+    }
+    return when {
+        ganador.aciertosComp != otro.aciertosComp ->
+            "desempate: más reintegros acertados (${ganador.aciertosComp} frente a ${otro.aciertosComp})"
+        ganador.premiosRecientes != otro.premiosRecientes ->
+            "desempate: más premios en los últimos 100 sorteos (${ganador.premiosRecientes} frente a ${otro.premiosRecientes})"
+        "%.3f".format(ganador.media) != "%.3f".format(otro.media) ->
+            "desempate por media de aciertos: %.3f frente a %.3f".format(ganador.media, otro.media)
+        else -> "empate total: juega las dos si quieres"
+    }
+}
+
 /** Un rasgo de la forma de una combinación 6/49 y si cumple lo habitual. */
 private data class RasgoPerfil(val texto: String, val cumple: Boolean)
 
@@ -1456,7 +1522,9 @@ private data class EstadisticaMetodo(
     val simulados: Int,
     /** Sorteos en que acertó el reintegro/estrella/clave y sorteos en que llevaba uno. */
     val aciertosComp: Int = 0,
-    val conComp: Int = 0
+    val conComp: Int = 0,
+    /** Premios en los 100 sorteos más recientes de la ventana (para desempatar). */
+    val premiosRecientes: Int = 0
 )
 
 /** Ranking: primero más premios, luego mayor máximo, luego mejor media. */
@@ -1494,13 +1562,25 @@ private fun estadisticasPorMetodo(
             distribucion = lista.groupingBy { it }.eachCount(),
             simulados = simulados[metodo] ?: 0,
             aciertosComp = aciertosComp[metodo] ?: 0,
-            conComp = conComp[metodo] ?: 0
+            conComp = conComp[metodo] ?: 0,
+            premiosRecientes = lista.take(100).count { it >= minPremio }
         )
-    }.sortedWith(
-        compareByDescending<EstadisticaMetodo> { it.premios }
-            .thenByDescending { it.maximo }
-            .thenByDescending { it.media }
-    )
+    }.sortedWith(ordenRanking(minPremio))
+}
+
+/**
+ * Orden del ranking (el MISMO que HistorialPredicciones.metodoLider, que usa la pantalla de inicio):
+ *  1. más premios · 2. "medallero": más veces con 6, luego 5, luego 4… aciertos ·
+ *  3. más reintegros/estrellas/clave acertados · 4. más premios en los últimos 100 sorteos ·
+ *  5. mejor media. Si todo es igual, el orden es alfabético (y la Jugada enseña ambas).
+ */
+private fun ordenRanking(minPremio: Int): Comparator<EstadisticaMetodo> {
+    var c = compareByDescending<EstadisticaMetodo> { it.premios }
+    for (k in 6 downTo minPremio) c = c.thenByDescending { it.distribucion[k] ?: 0 }
+    return c.thenByDescending { it.aciertosComp }
+        .thenByDescending { it.premiosRecientes }
+        .thenByDescending { it.media }
+        .thenBy { it.metodo }
 }
 
 // ═══════════════════════════════════════════════════════════════════

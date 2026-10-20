@@ -413,20 +413,25 @@ class HistorialPredicciones(context: Context) {
 
     /**
      * Método que más acierta en los últimos [ventanaRanking] sorteos del historial.
-     * MISMO criterio que la tarjeta 🏆: más premios (≥ [minPremio] aciertos), luego mayor
-     * máximo, luego mejor media. Devuelve (método, media) o null si no hay historial.
+     * MISMO orden que la tarjeta 🏆 (ordenRanking en PantallaResultados): premios →
+     * veces con 6, 5, 4… aciertos → complementarios acertados → premios en los últimos 100 →
+     * media → nombre. Devuelve (método, media) o null si no hay historial.
      */
     fun metodoLider(tipoLoteria: String, minPremio: Int): Pair<String, Double>? {
         val historial = cargarHistorial(tipoLoteria).take(ventanaRanking(tipoLoteria))
-        val aciertos = mutableMapOf<String, MutableList<Int>>()
+        val aciertos = mutableMapOf<String, MutableList<Int>>()     // del más reciente al más antiguo
+        val comp = mutableMapOf<String, Int>()
         for (entrada in historial) for (eval in entrada.evaluaciones) {
             aciertos.getOrPut(eval.metodo) { mutableListOf() }.add(eval.aciertosNumeros)
+            if (eval.aciertosComplementarios > 0) comp[eval.metodo] = (comp[eval.metodo] ?: 0) + 1
         }
-        return aciertos.entries.sortedWith(
-            compareByDescending<Map.Entry<String, MutableList<Int>>> { e -> e.value.count { it >= minPremio } }
-                .thenByDescending { e -> e.value.max() }
-                .thenByDescending { e -> e.value.average() }
-        ).firstOrNull()?.let { it.key to it.value.average() }
+        var orden = compareByDescending<Map.Entry<String, MutableList<Int>>> { e -> e.value.count { it >= minPremio } }
+        for (k in 6 downTo minPremio) orden = orden.thenByDescending { e -> e.value.count { it == k } }
+        orden = orden.thenByDescending { e -> comp[e.key] ?: 0 }
+            .thenByDescending { e -> e.value.take(100).count { it >= minPremio } }
+            .thenByDescending { e -> e.value.average() }
+            .thenBy { e -> e.key }
+        return aciertos.entries.sortedWith(orden).firstOrNull()?.let { it.key to it.value.average() }
     }
 
     fun obtenerRankingMetodos(tipoLoteria: String): List<Triple<String, Double, Int>> {
