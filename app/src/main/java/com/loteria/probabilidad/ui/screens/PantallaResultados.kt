@@ -336,6 +336,11 @@ private fun ResultadosContent(
         // Loterías de bolas: pantalla limpia con 2 tarjetas
         //  1. Qué jugar en el próximo sorteo (combinación del método que más acierta)
         //  2. Qué método acierta más (con su detalle al tocar)
+        // Décimos (Nacional, Navidad, Niño): semáforo fijo, no hay bote
+        if (!esDeBolas) {
+            item { SemaforoDecimosCard() }
+        }
+
         if (esDeBolas) {
             // Sorteos que cuentan para el "mejor método" (y por tanto para la Jugada):
             // los últimos 10, 100 o 1.000, a elección del usuario en la tarjeta 🏆.
@@ -1640,6 +1645,44 @@ private fun formatearBote(euros: Double): String = when {
  * ¿Merece la pena jugar el próximo sorteo? Verde / amarillo / rojo según el bote,
  * que se obtiene solo de internet. Al tocarla: la explicación.
  */
+/**
+ * Semáforo de los sorteos de décimos. No hay bote: por ley se reparte en premios el 70 % de
+ * lo jugado, más que la Primitiva sin bote (55 %), pero se sigue perdiendo de media.
+ * 0,70 € por euro cae en amarillo con los umbrales de GestionBankroll (0,57 / 0,715).
+ */
+@Composable
+private fun SemaforoDecimosCard(modifier: Modifier = Modifier) {
+    val rec = RecomendacionJuego.MODERADO
+    val color = Color(rec.color)
+    var expandido by remember { mutableStateOf(false) }
+    TarjetaApp(modifier = modifier.fillMaxWidth().clickable { expandido = !expandido }) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(color))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("¿Merece la pena jugar?", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(rec.displayName, style = MaterialTheme.typography.titleMedium, color = color)
+                }
+                Icon(
+                    if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = "Ver explicación"
+                )
+            }
+            if (expandido) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Aquí no hay bote: los premios son fijos y, por ley, se reparte en premios el 70 % " +
+                        "de lo jugado. De cada 10 € vuelven 7 € de media. Es mejor que la Primitiva sin " +
+                        "bote (5,50 €), pero de media se pierde, así que mejor poco y por ilusión.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SemaforoBoteCard(
     tipoLoteria: TipoLoteria,

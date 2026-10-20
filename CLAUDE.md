@@ -46,7 +46,11 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `domain/calculator/FormaTipica` — forma típica de cualquier lotería de bolas (6/49 y 5 números);
   la usan Perfil típico y la tarjeta "Forma de la combinación". `scripts/laboratorio_perfil_5.py`:
   Euromillones (1.890) y Gordo (1.022) en walk-forward → igual que el azar.
-- `BoteOficial`: códigos LAPR, BONO, EMIL, ELGR comprobados (oct-2026); ignora sorteos ya pasados.
+- `BoteOficial`: 1º API oficial (códigos LAPR, BONO, EMIL, ELGR comprobados oct-2026), 2º solo
+  Primitiva primitiva.org.es, 3º `datos/botes.json` en GitHub (lo escribe cada noche
+  `actualizar_datos.py → guardar_botes`; la API oficial a veces rechaza al móvil). Ignora sorteos pasados.
+  Sin bote, inicio muestra "Sin datos del bote" en gris. Décimos (Nacional/Navidad/Niño): semáforo fijo
+  amarillo (70 % en premios por ley), sin pasar por GestionBankroll.
 - Historial: entradas `simulado = true` (walk-forward, sin entrenar la IA) de los últimos
   `OBJETIVO_SIMULACION` (1.000) sorteos. NO hay botón: `service/SimulacionHistoricaWorker`
   (se programa en cada arranque, KEEP, tras la migración) los simula solo, por tramos de 8 min
@@ -102,6 +106,8 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `PantallaLogin`: contraseña en texto plano en un repo público.
 - Datos de Lotería Nacional muy cortos (22 sorteos, hasta 2024); faltan Navidad 2025 y Niño 2026.
 - `MotorInteligencia.kt` tiene ~5.500 líneas: partir por estrategias.
+- `GestionBankroll.obtenerEstructuraPremios` de Nacional/Navidad/Niño no cuadra (Navidad daría 137 %
+  de retorno, Niño 29 %); por ley es el 70 %. Revisar antes de usarla para algo.
 
 ## Expectativas honestas
 
