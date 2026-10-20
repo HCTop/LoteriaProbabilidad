@@ -37,10 +37,16 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 - `service/SincronizacionDiariaWorker` — WorkManager, 1 vez al día (~9:00, con red y batería):
   descarga CSV, `evaluarPendientes()` y guarda predicciones del próximo sorteo de las 4 loterías
   de bolas. Se programa en `MainActivity.onCreate` con KEEP (no se duplica).
-- Reintegro (Primitiva/Bonoloto): cada método lo calcula con SU criterio en
-  `CalculadorProbabilidad.reintegrosSegunMetodo` (fríos → el menos salido, calientes → últimos 50,
-  debidos → el más atrasado…) usando solo sorteos desde `INICIO_REINTEGRO` (1991-06-20; antes el CSV
-  trae 0 inventado). `ObtenerCombinacionesUseCase` ya NO lo baraja. Solo se puede elegir comprando online.
+- Complementos (reintegro, estrellas, clave): cada método los calcula con SU criterio en
+  `CalculadorProbabilidad.complementosSegunMetodo` (fríos → el menos salido, calientes → últimos 50,
+  debidos → el más atrasado…). Reintegro solo desde `INICIO_REINTEGRO` (1991-06-20; antes el CSV trae 0
+  inventado); estrellas solo desde `INICIO_12_ESTRELLAS` (2016-09-27) y, si la 2ª estrella del CSV viene
+  rota (siempre 1), se ignora. `ObtenerCombinacionesUseCase` ya NO baraja nada. El reintegro solo se
+  puede elegir comprando online; estrellas y clave las elige siempre el jugador.
+- `domain/calculator/FormaTipica` — forma típica de cualquier lotería de bolas (6/49 y 5 números);
+  la usan Perfil típico y la tarjeta "Forma de la combinación". `scripts/laboratorio_perfil_5.py`:
+  Euromillones (1.890) y Gordo (1.022) en walk-forward → igual que el azar.
+- `BoteOficial`: códigos LAPR, BONO, EMIL, ELGR comprobados (oct-2026); ignora sorteos ya pasados.
 - Historial: entradas `simulado = true` (walk-forward, sin entrenar la IA) de los últimos
   `OBJETIVO_SIMULACION` (1.000) sorteos. NO hay botón: `service/SimulacionHistoricaWorker`
   (se programa en cada arranque, KEEP, tras la migración) los simula solo, por tramos de 8 min
@@ -86,8 +92,9 @@ El dueño es Hector, aprendiz de programador (sobre todo Java): explicar en espa
 
 ## Pendientes conocidos
 
-- Euromillones: la 2ª estrella era siempre 1 por un fallo del scraper (columna vacía).
-  Script corregido; el CSV se regenera con la Action nocturna (o lanzarla a mano).
+- Euromillones: la 2ª estrella es siempre 1 en el CSV (fallo antiguo del scraper). El script está
+  corregido en la rama `claude/historial-predicciones`, pero la Action nocturna usa el de `master`:
+  fusionar en master o lanzar la Action a mano sobre la rama para regenerar el CSV.
 - `AprendizajeContinuo`: separar su historial del de sorteos reales o eliminarlo.
 - "K-Fold temporal" en `MotorInteligencia` entrena con datos futuros; solo walk-forward es válido.
 - Pantalla Backtest crea otro `ResultadosViewModel` que regenera predicciones solo para
